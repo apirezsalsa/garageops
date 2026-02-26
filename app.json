@@ -1,16 +1,16 @@
 {
   "expo": {
-    "name": "MotoApp",
-    "slug": "MotoApp",
-    "version": "1.0.0",
+    "name": "GarageOps",
+    "slug": "GarageOps",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#121212"
     },
     "ios": {
       "supportsTablet": true
@@ -18,12 +18,31 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#121212"
       },
-      "edgeToEdgeEnabled": true
+      "package": "com.apirezsalsa.GarageOps",
+      "softwareKeyboardLayoutMode": "adjustResize",
+      "statusBar": {
+        "translucent": true,
+        "barStyle": "light-content"
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-localization",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow GarageOps to access your photos to save vehicle and receipt images."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "4914b85b-7440-49e0-af2e-02cb2a26cb07"
+      }
     }
   }
 }
