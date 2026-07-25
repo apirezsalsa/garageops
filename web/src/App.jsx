@@ -1541,7 +1541,7 @@ export function App() {
                     <span>{language === 'es' ? 'Control Preventivo Inteligente' : language === 'en' ? 'Smart Preventive Control' : 'Controllo Preventivo Intelligente'}</span>
                   </div>
                   <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
-                    {language === 'es' ? 'Estado de la Flota' : language === 'en' ? 'Fleet Status' : 'Stato del Parco'}
+                    {language === 'es' ? 'Estado del Garaje' : language === 'en' ? 'Garage Status' : 'Stato del Garage'}
                   </h2>
                   <p className="text-xs sm:text-sm text-zinc-400 mt-1 max-w-xl">
                     {language === 'es' ? 'Monitoreo en tiempo real de tus vehículos, repuestos críticos e intervenciones de taller.' : language === 'en' ? 'Real-time monitoring of your vehicles, critical parts, and service records.' : 'Monitoraggio in tempo reale dei tuoi veicoli, ricambi critici e interventi di officina.'}
