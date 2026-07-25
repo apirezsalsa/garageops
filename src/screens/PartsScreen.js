@@ -8,11 +8,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import SpotlightOverlay from '../components/SpotlightOverlay';
 import { getParts, addPart, deletePart, updatePart } from '../services/partsService';
 import { getVehicles } from '../services/vehicleService';
+import { useAuth } from '../context/AuthContext';
 import * as Print from 'expo-print';
 import { shareAsync } from 'expo-sharing';
 
 const PartsScreen = ({ navigation }) => {
     const { t } = useTranslation();
+    const { user } = useAuth();
+    const isActive = user?.isActive !== false;
     const [parts, setParts] = useState([]);
     const [vehicles, setVehicles] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -89,6 +92,10 @@ const PartsScreen = ({ navigation }) => {
     };
 
     const handleSave = async () => {
+        if (!isActive) {
+            Alert.alert(t('inactive_modal_title'), t('inactive_modal_desc'));
+            return;
+        }
         if (!modalData.name) {
             Alert.alert(t('error'), t('error_name_required'));
             return;
@@ -121,6 +128,10 @@ const PartsScreen = ({ navigation }) => {
     };
 
     const handleDelete = (id) => {
+        if (!isActive) {
+            Alert.alert(t('inactive_modal_title'), t('inactive_modal_desc'));
+            return;
+        }
         Alert.alert(
             t('delete_part_title'),
             t('delete_part_confirm'),
@@ -157,6 +168,10 @@ const PartsScreen = ({ navigation }) => {
     };
 
     const openNewModal = () => {
+        if (!isActive) {
+            Alert.alert(t('inactive_modal_title'), t('inactive_modal_desc'));
+            return;
+        }
         setIsEditing(false);
         setCurrentItem(null);
         setModalData({ name: '', ref: '', price: '', vehicleId: '', stockQty: '', stockUnit: 'ud' });
@@ -257,10 +272,10 @@ const PartsScreen = ({ navigation }) => {
                 <View style={{ alignItems: 'flex-end' }}>
                     <Text style={styles.itemPrice}>{item.price} €</Text>
                     <View style={styles.actions}>
-                        <TouchableOpacity onPress={() => editItem(item)} style={styles.actionBtn}>
+                        <TouchableOpacity onPress={() => isActive ? editItem(item) : Alert.alert(t('inactive_modal_title'), t('inactive_modal_desc'))} style={[styles.actionBtn, !isActive && { opacity: 0.5 }]}>
                             <Edit2 size={16} color="#888" />
                         </TouchableOpacity>
-                        <TouchableOpacity onPress={() => handleDelete(item.id)} style={[styles.actionBtn, { marginLeft: 12 }]}>
+                        <TouchableOpacity onPress={() => isActive ? handleDelete(item.id) : Alert.alert(t('inactive_modal_title'), t('inactive_modal_desc'))} style={[styles.actionBtn, { marginLeft: 12 }, !isActive && { opacity: 0.5 }]}>
                             <Trash2 size={16} color="#FF5252" />
                         </TouchableOpacity>
                     </View>
@@ -277,7 +292,7 @@ const PartsScreen = ({ navigation }) => {
                     <TouchableOpacity style={{ padding: 8, marginRight: 8 }} onPress={generatePDF}>
                         <Share2 size={24} color="#F2780D" />
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.addButton} onPress={openNewModal}>
+                    <TouchableOpacity style={[styles.addButton, !isActive && { opacity: 0.5 }]} onPress={openNewModal}>
                         <Plus size={24} color="#121212" />
                     </TouchableOpacity>
                 </View>

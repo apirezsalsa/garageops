@@ -62,6 +62,12 @@ const AddVehicleScreen = ({ navigation }) => {
     };
 
     const handleSave = async () => {
+        // --- BRIDGE: CHECK ACTIVE STATUS ---
+        if (user?.isActive === false) {
+            Alert.alert(t('inactive_modal_title'), t('inactive_modal_desc'));
+            return;
+        }
+
         if (!make || !model) {
             Alert.alert(t('error'), t('error_make_model'));
             return;

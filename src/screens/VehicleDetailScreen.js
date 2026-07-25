@@ -121,7 +121,13 @@ const VehicleDetailScreen = ({ route, navigation }) => {
         }, [currentVehicle.id])
     );
 
+    const isActive = user?.isActive !== false;
+
     const handleUpdateUsage = async () => {
+        if (!isActive) {
+            Alert.alert(t('inactive_modal_title'), t('inactive_modal_desc'));
+            return;
+        }
         if (!newUsage || isNaN(Number(newUsage))) {
             Alert.alert(t('error'), t('valid_numeric_value_error'));
             return;
@@ -162,6 +168,10 @@ const VehicleDetailScreen = ({ route, navigation }) => {
     };
 
     const handlePickImage = async () => {
+        if (!isActive) {
+            Alert.alert(t('inactive_modal_title'), t('inactive_modal_desc'));
+            return;
+        }
         try {
             const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
             if (status !== 'granted') {
@@ -191,6 +201,10 @@ const VehicleDetailScreen = ({ route, navigation }) => {
     };
 
     const handleResetImage = () => {
+        if (!isActive) {
+            Alert.alert(t('inactive_modal_title'), t('inactive_modal_desc'));
+            return;
+        }
         setShowPhotoOptions(false);
         // Default format: DEFAULT_MOTO, DEFAULT_COCHE, etc.
         const defaultTag = `DEFAULT_${currentVehicle.type ? currentVehicle.type.toUpperCase() : 'MOTO'}`;
@@ -216,6 +230,10 @@ const VehicleDetailScreen = ({ route, navigation }) => {
     };
 
     const handleDelete = () => {
+        if (!isActive) {
+            Alert.alert(t('inactive_modal_title'), t('inactive_modal_desc'));
+            return;
+        }
         Alert.alert(
             t('delete_vehicle_title'),
             t('delete_vehicle_confirm'),
@@ -277,7 +295,7 @@ const VehicleDetailScreen = ({ route, navigation }) => {
                 <Text style={styles.title}>{currentVehicle.name}</Text>
                 <View style={{ flexDirection: 'row' }}>
 
-                    <TouchableOpacity style={styles.settingsButton} onPress={handleDelete}>
+                    <TouchableOpacity style={[styles.settingsButton, !isActive && { opacity: 0.5 }]} onPress={handleDelete}>
                         <Trash2 size={20} color="#FF5252" />
                     </TouchableOpacity>
                 </View>
@@ -346,8 +364,14 @@ const VehicleDetailScreen = ({ route, navigation }) => {
 
                 {/* Quick Actions */}
                 <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={() => navigation.navigate('AddMaintenance', { vehicle: currentVehicle })}
+                    style={[styles.actionButton, !isActive && { opacity: 0.5 }]}
+                    onPress={() => {
+                        if (!isActive) {
+                             Alert.alert(t('inactive_modal_title'), t('inactive_modal_desc'));
+                             return;
+                        }
+                        navigation.navigate('AddMaintenance', { vehicle: currentVehicle });
+                    }}
                 >
                     <Plus size={24} color="#121212" strokeWidth={3} />
                     <Text style={styles.actionText}>{t('new_maintenance_button')}</Text>

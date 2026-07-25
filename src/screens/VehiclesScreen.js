@@ -169,11 +169,23 @@ const VehiclesScreen = ({ navigation }) => {
 
     return (
         <SafeAreaView style={styles.container}>
+            {!isActive && (
+                <View style={styles.inactiveBanner}>
+                    <AlertTriangle size={16} color="#000" />
+                    <Text style={styles.inactiveBannerText}>{t('inactive_banner')}</Text>
+                </View>
+            )}
             <View style={styles.header}>
                 <Text style={styles.title}>{t('my_garage')}</Text>
                 <TouchableOpacity
-                    style={styles.addButton}
-                    onPress={() => navigation.navigate('AddVehicle')}
+                    style={[styles.addButton, !isActive && { opacity: 0.5 }]}
+                    onPress={() => {
+                        if (!isActive) {
+                             Alert.alert(t('inactive_modal_title'), t('inactive_modal_desc'));
+                             return;
+                        }
+                        navigation.navigate('AddVehicle');
+                    }}
                 >
                     <Plus size={24} color="#F2780D" />
                 </TouchableOpacity>
@@ -260,6 +272,19 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: '#121212',
+    },
+    inactiveBanner: {
+        backgroundColor: '#F2780D',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 10,
+        gap: 8,
+    },
+    inactiveBannerText: {
+        color: '#121212',
+        fontSize: 13,
+        fontWeight: 'bold',
     },
     header: {
         paddingHorizontal: 20,

@@ -400,5 +400,8 @@
     "spotlight_history_1_title": "Historial de Tareas",
     "spotlight_history_1_desc": "Consulta todos los trabajos realizados en tus vehículos. Puedes pulsar en cada uno para ver los detalles y materiales usados.",
     "spotlight_history_2_title": "Exportar Reportes",
-    "spotlight_history_2_desc": "Genera archivos PDF profesionales de tu historial para compartirlos por WhatsApp, email o guardarlos como copia de seguridad."
+    "spotlight_history_2_desc": "Genera archivos PDF profesionales de tu historial para compartirlos por WhatsApp, email o guardarlos como copia de seguridad.",
+    "inactive_modal_title": "Acceso Limitado (Socio Inactivo)",
+    "inactive_modal_desc": "Para poder añadir vehículos o registrar nuevos mantenimientos, debes tener tu cuota de socio de Distrito Enduro al día.\n\nPuedes consultar tu garaje en modo lectura, pero las funciones de creación y edición están bloqueadas hasta que se regularice la cuota.",
+    "inactive_banner": "MODO CONSULTA: Cuota de socio inactiva o pendiente."
 }

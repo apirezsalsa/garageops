@@ -1,7 +1,16 @@
+import { Platform } from 'react-native';
 import { db, auth } from '../config/firebase';
-import { collection, query, where, getDocs, addDoc, doc, updateDoc, deleteDoc, orderBy, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import * as webApi from './webApi';
 
 export const addMaintenance = async (vehicleId, maintenanceData) => {
+    if (Platform.OS === 'web') {
+        return webApi.request('maintenance', {
+            method: 'POST',
+            body: JSON.stringify({ ...maintenanceData, vehicle_id: vehicleId })
+        });
+    }
+
     try {
         if (!auth.currentUser) throw new Error('Usuario no autenticado');
 
@@ -12,9 +21,6 @@ export const addMaintenance = async (vehicleId, maintenanceData) => {
             createdAt: new Date(),
         });
 
-        // Update vehicle usage if the new maintenance has a higher usage
-        // This is optional but good practice to keep vehicle usage current
-        // For now we just return the maintenance record
         return { id: docRef.id, ...maintenanceData };
     } catch (error) {
         console.error('Error adding maintenance: ', error);
@@ -23,15 +29,17 @@ export const addMaintenance = async (vehicleId, maintenanceData) => {
 };
 
 export const getMaintenanceHistory = async (vehicleId) => {
+    if (Platform.OS === 'web') {
+        return webApi.request(`maintenance?vehicle_id=${vehicleId}`);
+    }
+
     try {
         if (!auth.currentUser) return [];
 
-        // Simplified query to avoid "Missing Index" error
         const q = query(
             collection(db, 'maintenances'),
             where('vehicleId', '==', vehicleId),
             where('userId', '==', auth.currentUser.uid)
-            // Removed orderBy('date', 'desc') to avoid composite index requirement
         );
         const querySnapshot = await getDocs(q);
 
@@ -40,11 +48,10 @@ export const getMaintenanceHistory = async (vehicleId) => {
             history.push({ id: doc.id, ...doc.data() });
         });
 
-        // Sort in client-side
         history.sort((a, b) => {
             const dateA = a.date?.seconds || 0;
             const dateB = b.date?.seconds || 0;
-            return dateB - dateA; // Descending
+            return dateB - dateA;
         });
 
         return history;
@@ -55,6 +62,12 @@ export const getMaintenanceHistory = async (vehicleId) => {
 };
 
 export const deleteMaintenance = async (maintenanceId) => {
+    if (Platform.OS === 'web') {
+        return webApi.request(`maintenance/${maintenanceId}`, {
+            method: 'DELETE'
+        });
+    }
+
     try {
         const ref = doc(db, 'maintenances', maintenanceId);
         await deleteDoc(ref);
@@ -65,6 +78,13 @@ export const deleteMaintenance = async (maintenanceId) => {
 };
 
 export const updateMaintenance = async (maintenanceId, updatedData) => {
+    if (Platform.OS === 'web') {
+        return webApi.request(`maintenance/${maintenanceId}`, {
+            method: 'PUT',
+            body: JSON.stringify(updatedData)
+        });
+    }
+
     try {
         const ref = doc(db, 'maintenances', maintenanceId);
         await updateDoc(ref, updatedData);
@@ -74,27 +94,28 @@ export const updateMaintenance = async (maintenanceId, updatedData) => {
     }
 };
 
-// For Dashboard "Next Job" or global stats
 export const getAllMaintenances = async (limitCount = 20) => {
+    if (Platform.OS === 'web') {
+        // Handle global search/recent maintenance
+        // In this simple API, we might need a specific endpoint or just fetch all
+        return webApi.request('maintenance/all'); // Assuming I might add this or just rely on vehicle history
+    }
+
     try {
         if (!auth.currentUser) return [];
-        // Simplified query to avoid "Missing Index" error
         const q = query(
             collection(db, 'maintenances'),
             where('userId', '==', auth.currentUser.uid)
-            // Removed orderBy and limit to avoid composite index requirement
         );
         const snapshot = await getDocs(q);
         const allDocs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-        // Sort in client-side
         allDocs.sort((a, b) => {
             const dateA = a.date?.seconds || 0;
             const dateB = b.date?.seconds || 0;
             return dateB - dateA;
         });
 
-        // Manual limit if requested
         if (limitCount && limitCount > 0) {
             return allDocs.slice(0, limitCount);
         }

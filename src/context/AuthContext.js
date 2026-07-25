@@ -1,4 +1,5 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
+import { Platform } from 'react-native';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
@@ -13,6 +14,43 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        // --- BRIDGE: DISTRITO ENDURO INTEGRATION (WEB ONLY) ---
+        if (Platform.OS === 'web') {
+            const distritoSession = localStorage.getItem('distrito_v2_session');
+            if (distritoSession) {
+                try {
+                    const sessionData = JSON.parse(distritoSession);
+                    if (sessionData && sessionData.user) {
+                        console.log("🔗 Bridge Auth: Logged in using Distrito Enduro Session", sessionData.user);
+                        const mockedUser = {
+                            uid: `distrito_${sessionData.user.id}`,
+                            email: sessionData.user.email,
+                            displayName: `${sessionData.user.nombre} ${sessionData.user.apellidos || ''}`,
+                            isDistritoUser: true,
+                            isActive: sessionData.user.isActive // Extraído de la sesión de Distrito
+                        };
+                        setUser(mockedUser);
+                        setUserProfile({
+                            ...sessionData.user,
+                            isPremium: sessionData.user.isActive, // Premium solo si ha pagado
+                            source: 'distrito'
+                        });
+                        setLoading(false);
+                        return; // Bypass original Firebase Auth
+                    }
+                } catch (e) {
+                    console.error("Error parsing Distrito session:", e);
+                }
+            }
+            
+            // Si es plataforma web y no hay sesión de Distrito Enduro, redirigimos al login
+            // Evitamos totalmente mostrar el Firebase Auth Login
+            console.log("🔴 No valid Distrito session found. Redirecting to login...");
+            window.location.href = '/login.html';
+            return;
+        }
+        // --- END BRIDGE ---
+
         let unsubscribeProfile = () => { };
 
         const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {

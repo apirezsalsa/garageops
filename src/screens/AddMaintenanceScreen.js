@@ -304,7 +304,13 @@ const AddMaintenanceScreen = ({ navigation, route }) => {
         return [...selectedCategory.types, 'other'];
     };
 
+    const isActive = user?.isActive !== false;
+
     const handleSave = async () => {
+        if (!isActive) {
+            Alert.alert(t('inactive_modal_title'), t('inactive_modal_desc'));
+            return;
+        }
         if ((!selectedType && !customType) || !currentUsage) {
             Alert.alert(t('error'), t('error_job_reading'));
             return;
@@ -362,6 +368,10 @@ const AddMaintenanceScreen = ({ navigation, route }) => {
         }
     };
     const handleDelete = () => {
+        if (!isActive) {
+            Alert.alert(t('inactive_modal_title'), t('inactive_modal_desc'));
+            return;
+        }
         Alert.alert(
             t('delete_maintenance'),
             t('delete_maintenance_confirm'),
@@ -809,7 +819,7 @@ const AddMaintenanceScreen = ({ navigation, route }) => {
 
             <View style={styles.footer}>
                 <TouchableOpacity
-                    style={[styles.saveMainButton, ((!selectedType && !customType) || loading) && { opacity: 0.5, backgroundColor: '#333' }]}
+                    style={[styles.saveMainButton, ((!selectedType && !customType) || loading || !isActive) && { opacity: 0.5 }]}
                     disabled={(!selectedType && !customType) || loading}
                     onPress={handleSave}
                 >

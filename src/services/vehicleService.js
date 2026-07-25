@@ -1,7 +1,13 @@
+import { Platform } from 'react-native';
 import { db, auth } from '../config/firebase';
-import { collection, query, where, getDocs, addDoc, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, doc, updateDoc, writeBatch } from 'firebase/firestore';
+import * as webApi from './webApi';
 
 export const getVehicles = async () => {
+    if (Platform.OS === 'web') {
+        return webApi.request('vehicles');
+    }
+
     try {
         if (!auth.currentUser) return [];
 
@@ -21,6 +27,13 @@ export const getVehicles = async () => {
 };
 
 export const addVehicle = async (vehicleData) => {
+    if (Platform.OS === 'web') {
+        return webApi.request('vehicles', {
+            method: 'POST',
+            body: JSON.stringify(vehicleData)
+        });
+    }
+
     try {
         if (!auth.currentUser) throw new Error('Usuario no autenticado');
 
@@ -38,6 +51,13 @@ export const addVehicle = async (vehicleData) => {
 };
 
 export const updateVehicle = async (vehicleId, updatedData) => {
+    if (Platform.OS === 'web') {
+        return webApi.request(`vehicles/${vehicleId}`, {
+            method: 'PUT',
+            body: JSON.stringify(updatedData)
+        });
+    }
+
     try {
         const vehicleRef = doc(db, 'vehicles', vehicleId);
         await updateDoc(vehicleRef, updatedData);
@@ -48,6 +68,12 @@ export const updateVehicle = async (vehicleId, updatedData) => {
 };
 
 export const deleteVehicle = async (vehicleId) => {
+    if (Platform.OS === 'web') {
+        return webApi.request(`vehicles/${vehicleId}`, {
+            method: 'DELETE'
+        });
+    }
+
     try {
         const batch = writeBatch(db);
 

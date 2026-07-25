@@ -39,3 +39,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# temp and build binaries
+*.apk
+temp-app/
+garageops_structure.json

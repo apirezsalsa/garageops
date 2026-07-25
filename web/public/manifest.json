@@ -1,0 +1,21 @@
+{
+  "short_name": "GarageOps",
+  "name": "GarageOps - Gestión de Garaje & Mantenimiento SaaS",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#09090b",
+  "theme_color": "#f97316",
+  "display": "standalone",
+  "orientation": "portrait"
+}
