@@ -700,6 +700,17 @@ export function App() {
     e.preventDefault();
     if (!newVehicleForm.name) return;
 
+    // Validación de límites según el plan
+    const maxAllowed = currentPlan === 'starter' ? 2 : currentPlan === 'pro' ? 4 : 999;
+    if (vehicles.length >= maxAllowed) {
+      alert(
+        language === 'es'
+          ? `Has alcanzado el límite de ${maxAllowed} vehículos de tu plan (${currentPlan.toUpperCase()}). Actualiza tu suscripción en Perfil & Ajustes para añadir más.`
+          : `You reached the limit of ${maxAllowed} vehicles for your plan (${currentPlan.toUpperCase()}). Please upgrade in Profile & Settings.`
+      );
+      return;
+    }
+
     const newVehicle = {
       name: newVehicleForm.name,
       category: newVehicleForm.category,
@@ -2490,13 +2501,13 @@ export function App() {
                     {language === 'es' ? 'Vehículos en Garaje' : language === 'en' ? 'Garage Vehicles' : 'Veicoli nel Garage'}
                   </span>
                   <span className="font-mono font-bold text-orange-400">
-                    {vehicles.length} / {currentPlan === 'starter' ? '1' : currentPlan === 'pro' ? '4' : 'Ilimitados'}
+                    {vehicles.length} / {currentPlan === 'starter' ? '2' : currentPlan === 'pro' ? '4' : 'Ilimitados'}
                   </span>
                 </div>
                 <div className="w-full bg-zinc-900 h-2 rounded-full overflow-hidden border border-zinc-800">
                   <div 
                     className="bg-orange-500 h-full transition-all duration-300" 
-                    style={{ width: `${Math.min(100, (vehicles.length / (currentPlan === 'starter' ? 1 : currentPlan === 'pro' ? 4 : 100)) * 100)}%` }}
+                    style={{ width: `${Math.min(100, (vehicles.length / (currentPlan === 'starter' ? 2 : currentPlan === 'pro' ? 4 : 100)) * 100)}%` }}
                   ></div>
                 </div>
               </div>
@@ -2531,34 +2542,34 @@ export function App() {
 
               {/* TABLA COMPARATIVA DE PLANES SAAS ENFOCADOS A DIY & PARTICULARES */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-                {/* PLAN 1: STARTER DIY (GRATIS - 1 VEHÍCULO) */}
+                {/* PLAN 1: STARTER DIY (GRATIS - HASTA 2 VEHÍCULOS POR 1 MES DE PRUEBA) */}
                 <div className={`p-4 rounded-2xl border flex flex-col justify-between space-y-4 transition-all ${
                   currentPlan === 'starter' 
                     ? 'bg-orange-500/10 border-orange-500 shadow-lg' 
                     : 'bg-zinc-950/60 border-zinc-800'
                 }`}>
                   <div>
-                    <h4 className="font-extrabold text-sm text-white">DIY Starter</h4>
+                    <h4 className="font-extrabold text-sm text-white">DIY Starter (Prueba)</h4>
                     <p className="text-[10px] text-zinc-400 mt-0.5">
-                      {language === 'es' ? 'Para tu vehículo principal' : language === 'en' ? 'For your daily ride' : 'Per il tuo veicolo principale'}
+                      {language === 'es' ? 'Prueba gratuita de 1 mes' : language === 'en' ? '1 Month Free Trial' : 'Prova gratuita di 1 mese'}
                     </p>
                     <div className="mt-3">
                       <span className="text-xl font-extrabold text-white font-mono">0 €</span>
-                      <span className="text-[10px] text-zinc-500 block">
-                        {language === 'es' ? 'Gratis para siempre' : language === 'en' ? 'Free forever' : 'Gratis per sempre'}
+                      <span className="text-[10px] text-orange-400 font-bold block">
+                        {language === 'es' ? '1 Mes Gratis • Luego pasa a DIY Garage' : '1 Month Free • Then upgrades to DIY Garage'}
                       </span>
                     </div>
                     <ul className="mt-3 space-y-1.5 text-[11px] text-zinc-400">
                       <li className="flex items-center gap-1.5">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        <span><strong>1 Vehículo</strong> (Moto o Coche)</span>
+                        <span><strong>Hasta 2 Vehículos</strong> (Motos o Coches)</span>
                       </li>
                       <li className="flex items-center gap-1.5">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        <span>Historial básico de servicios</span>
+                        <span>Historial y control de stock básico</span>
                       </li>
-                      <li className="flex items-center gap-1.5 text-zinc-600">
-                        <span>• Alertas avanzadas excluidas</span>
+                      <li className="flex items-center gap-1.5 text-amber-400 font-semibold">
+                        <span>• Límite: 30 Días de Prueba</span>
                       </li>
                     </ul>
                   </div>
