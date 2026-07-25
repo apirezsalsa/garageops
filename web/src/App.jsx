@@ -410,12 +410,15 @@ export function App() {
   // Rol de usuario (SuperAdmin activo para gestión global)
   const isSuperAdmin = true;
   const [allUsersList, setAllUsersList] = useState([
-    { id: 'u1', email: 'demo@garageops.io', role: 'admin', plan: 'unlimited', vehiclesCount: 3, status: 'active', registered: '2026-07-20' },
-    { id: 'u2', email: 'alex.mecanica@garageops.io', role: 'user', plan: 'pro', vehiclesCount: 2, status: 'active', registered: '2026-07-22' },
-    { id: 'u3', email: 'carlos.enduro@gmail.com', role: 'user', plan: 'starter', vehiclesCount: 1, status: 'active', registered: '2026-07-24' },
-    { id: 'u4', email: 'taller.racing@motos.es', role: 'user', plan: 'unlimited', vehiclesCount: 8, status: 'active', registered: '2026-07-25' }
+    { id: 'u1', email: 'demo@garageops.io', role: 'admin', plan: 'unlimited', giftDays: 0, vehiclesCount: 3, status: 'active', registered: '2026-07-20' },
+    { id: 'u2', email: 'alex.mecanica@garageops.io', role: 'user', plan: 'pro', giftDays: 30, vehiclesCount: 2, status: 'active', registered: '2026-07-22' },
+    { id: 'u3', email: 'carlos.enduro@gmail.com', role: 'user', plan: 'starter', giftDays: 0, vehiclesCount: 1, status: 'active', registered: '2026-07-24' },
+    { id: 'u4', email: 'taller.racing@motos.es', role: 'user', plan: 'unlimited', giftDays: 365, vehiclesCount: 8, status: 'active', registered: '2026-07-25' }
   ]);
   const [adminUserSearch, setAdminUserSearch] = useState('');
+  const [showGiftModal, setShowGiftModal] = useState(null); // usuario seleccionado para regalo
+  const [giftDaysInput, setGiftDaysInput] = useState('30');
+  const [giftPlanInput, setGiftPlanInput] = useState('unlimited');
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
@@ -2841,11 +2844,21 @@ export function App() {
                             <span>{u.email}</span>
                           </td>
                           <td className="py-3">
-                            <span className={`px-2 py-0.5 rounded font-mono text-[10px] font-bold ${
-                              u.role === 'admin' ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' : 'bg-zinc-800 text-zinc-400'
-                            }`}>
-                              {u.role.toUpperCase()}
-                            </span>
+                            <select
+                              value={u.role}
+                              onChange={(e) => {
+                                const newRole = e.target.value;
+                                setAllUsersList(prev => prev.map(item => item.id === u.id ? { ...item, role: newRole } : item));
+                              }}
+                              className={`rounded-lg px-2 py-1 text-xs font-mono font-bold outline-none border transition-all ${
+                                u.role === 'admin' 
+                                  ? 'bg-orange-500/10 text-orange-400 border-orange-500/30' 
+                                  : 'bg-zinc-950 text-zinc-300 border-zinc-800 focus:border-orange-500'
+                              }`}
+                            >
+                              <option value="user">USER (Cliente)</option>
+                              <option value="admin">ADMIN (SuperAdmin)</option>
+                            </select>
                           </td>
                           <td className="py-3">
                             <select
@@ -2881,7 +2894,26 @@ export function App() {
                               {u.status === 'active' ? '● ACTIVO' : '✕ SUSPENDIDO'}
                             </button>
                           </td>
-                          <td className="py-3 text-right pr-2 space-x-1">
+                          <td className="py-3 text-right pr-2 space-x-1 whitespace-nowrap">
+                            <button
+                              onClick={() => {
+                                setShowGiftModal(u);
+                                setGiftPlanInput(u.plan === 'starter' ? 'pro' : 'unlimited');
+                              }}
+                              title="Obsequiar pase temporal VIP / Pro"
+                              className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 font-bold text-[11px] border border-amber-500/30 transition-all active:scale-95"
+                            >
+                              🎁 Regalar Pass
+                            </button>
+                            <button
+                              onClick={() => {
+                                alert(`Se ha enviado un correo oficial a ${u.email} con el enlace seguro para restablecer su contraseña.`);
+                              }}
+                              title="Enviar email para forzar el restablecimiento de contraseña"
+                              className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-[11px] border border-zinc-700 transition-all active:scale-95"
+                            >
+                              🔑 Reset Clave
+                            </button>
                             <button
                               onClick={() => alert(`Modo soporte iniciado para ${u.email}. Inspeccionando garaje...`)}
                               className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold text-[11px] border border-zinc-700 transition-all active:scale-95"
@@ -2908,6 +2940,107 @@ export function App() {
         <MobileNavItem icon={History} label={t('history')} active={activeTab === 'history'} onClick={() => { setActiveTab('history'); setSelectedVehicle(null); }} />
         <MobileNavItem icon={User} label={t('profileTitle').split('&')[0].trim()} active={activeTab === 'profile'} onClick={() => { setActiveTab('profile'); setSelectedVehicle(null); }} />
       </nav>
+
+      {/* MODAL ADMIN: OBSEQUIAR MEMBRESÍA VIP / PRO */}
+      {showGiftModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-zinc-900 rounded-3xl border border-zinc-800 p-6 space-y-5 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🎁</span>
+                <div>
+                  <h3 className="font-bold text-base text-white">Obsequiar Membresía / Pase VIP</h3>
+                  <p className="text-xs text-zinc-400">Asigna acceso premium gratis por tiempo determinado.</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowGiftModal(null)}
+                className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center font-bold text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="bg-zinc-950 p-3.5 rounded-2xl border border-zinc-800/80 space-y-1">
+              <span className="text-[10px] font-mono text-zinc-500 uppercase font-bold block">Usuario Destinatario</span>
+              <p className="text-sm font-bold text-orange-400 font-mono">{showGiftModal.email}</p>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const days = parseInt(giftDaysInput) || 30;
+                setAllUsersList(prev => prev.map(u => u.id === showGiftModal.id ? { ...u, plan: giftPlanInput, giftDays: days } : u));
+                alert(`¡Se ha activado la membresía ${giftPlanInput.toUpperCase()} por ${days} días a ${showGiftModal.email}!`);
+                setShowGiftModal(null);
+              }}
+              className="space-y-4 text-xs"
+            >
+              <div>
+                <label className="block text-zinc-400 font-medium mb-1">Seleccionar Plan a Regalar</label>
+                <select
+                  value={giftPlanInput}
+                  onChange={(e) => setGiftPlanInput(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-medium"
+                >
+                  <option value="pro">DIY Garage (Hasta 4 Vehículos)</option>
+                  <option value="unlimited">Garage Unlimited (Vehículos Ilimitados)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-zinc-400 font-medium mb-1">Duración del Regalo (en Días)</label>
+                <div className="grid grid-cols-4 gap-2 mb-2">
+                  {[
+                    { label: '7 Días', days: '7' },
+                    { label: '1 Mes', days: '30' },
+                    { label: '3 Meses', days: '90' },
+                    { label: '1 Año', days: '365' }
+                  ].map((opt) => (
+                    <button
+                      key={opt.days}
+                      type="button"
+                      onClick={() => setGiftDaysInput(opt.days)}
+                      className={`py-2 rounded-xl border text-xs font-bold transition-all ${
+                        giftDaysInput === opt.days 
+                          ? 'bg-amber-500/20 border-amber-500 text-amber-400 shadow-sm' 
+                          : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="number"
+                  min="1"
+                  max="3650"
+                  placeholder="Número de días personalizado (ej: 45)"
+                  value={giftDaysInput}
+                  onChange={(e) => setGiftDaysInput(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-medium"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setShowGiftModal(null)}
+                  className="px-4 py-2.5 rounded-xl bg-zinc-800 text-zinc-300 font-bold hover:bg-zinc-700 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-zinc-950 font-extrabold shadow-lg shadow-amber-500/25 transition-all flex items-center gap-1.5"
+                >
+                  <span>🎁 Otorgar Membresía</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL BOTTOM SHEET: NUEVA / EDITAR INTERVENCIÓN COMPLETA */}
       {showAddMaintenanceModal && (
