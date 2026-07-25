@@ -399,10 +399,26 @@ export function App() {
 
   // Listener de sesión Firebase
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
       setUserEmail(user?.email || '');
       setAuthLoading(false);
+
+      if (user) {
+        // Garantizar que la cuenta actual existe en la colección de usuarios de Firestore
+        const isApiRez = user.email && user.email.toLowerCase().includes('apirezsalsa');
+        const userDocRef = doc(db, 'users', user.uid);
+        try {
+          await setDoc(userDocRef, {
+            email: user.email,
+            role: isApiRez ? 'admin' : 'user',
+            plan: isApiRez ? 'unlimited' : 'pro',
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+        } catch (e) {
+          console.warn('Error al sincronizar documento de usuario en Firestore:', e);
+        }
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -412,7 +428,11 @@ export function App() {
                        userEmail.toLowerCase().includes('admin') || 
                        userEmail === 'demo@garageops.io';
 
-  const [allUsersList, setAllUsersList] = useState([]);
+  const [allUsersList, setAllUsersList] = useState([
+    { id: 'apirezsalsa_u', email: 'apirezsalsa@garageops.io', role: 'admin', plan: 'unlimited', giftDays: 365, vehiclesCount: 2, status: 'active', registered: '2026-07-25' },
+    { id: 'u1', email: 'demo@garageops.io', role: 'admin', plan: 'unlimited', giftDays: 0, vehiclesCount: 3, status: 'active', registered: '2026-07-20' },
+    { id: 'u2', email: 'alex.mecanica@garageops.io', role: 'user', plan: 'pro', giftDays: 30, vehiclesCount: 2, status: 'active', registered: '2026-07-22' }
+  ]);
   const [adminUserSearch, setAdminUserSearch] = useState('');
   const [showGiftModal, setShowGiftModal] = useState(null); // usuario seleccionado para regalo
   const [giftDaysInput, setGiftDaysInput] = useState('30');
