@@ -450,7 +450,7 @@ export function App() {
     return collection(db, 'users', firebaseUser.uid, colName);
   }, [firebaseUser]);
 
-  // Listeners Firestore en tiempo real
+  // Listeners Firestore en tiempo real con fallback resiliente a localStorage
   useEffect(() => {
     if (!firebaseUser) {
       setVehicles([]);
@@ -459,49 +459,118 @@ export function App() {
       return;
     }
 
-    const vehiclesCol = collection(db, 'users', firebaseUser.uid, 'vehicles');
-    const maintCol = collection(db, 'users', firebaseUser.uid, 'maintenances');
-    const partsCol = collection(db, 'users', firebaseUser.uid, 'parts');
+    const uid = firebaseUser.uid;
+    const localVehKey = `garageops_vehicles_${uid}`;
+    const localMaintKey = `garageops_maintenances_${uid}`;
+    const localPartsKey = `garageops_parts_${uid}`;
+
+    // Cargar datos guardados previamente en local por si falla Firestore
+    const savedVeh = localStorage.getItem(localVehKey);
+    const savedMaint = localStorage.getItem(localMaintKey);
+    const savedParts = localStorage.getItem(localPartsKey);
+
+    setVehicles(savedVeh ? JSON.parse(savedVeh) : INITIAL_VEHICLES);
+    setMaintenances(savedMaint ? JSON.parse(savedMaint) : INITIAL_MAINTENANCES);
+    setParts(savedParts ? JSON.parse(savedParts) : INITIAL_PARTS);
+
+    const vehiclesCol = collection(db, 'users', uid, 'vehicles');
+    const maintCol = collection(db, 'users', uid, 'maintenances');
+    const partsCol = collection(db, 'users', uid, 'parts');
 
     const unsub1 = onSnapshot(vehiclesCol, (snap) => {
-      setVehicles(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+      if (!snap.empty) {
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setVehicles(list);
+        localStorage.setItem(localVehKey, JSON.stringify(list));
+      }
+    }, (err) => console.warn('Firestore vehicles listener fallback:', err));
+
     const unsub2 = onSnapshot(maintCol, (snap) => {
-      const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      items.sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
-      setMaintenances(items);
-    });
+      if (!snap.empty) {
+        const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        items.sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
+        setMaintenances(items);
+        localStorage.setItem(localMaintKey, JSON.stringify(items));
+      }
+    }, (err) => console.warn('Firestore maintenances listener fallback:', err));
+
     const unsub3 = onSnapshot(partsCol, (snap) => {
-      setParts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+      if (!snap.empty) {
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setParts(list);
+        localStorage.setItem(localPartsKey, JSON.stringify(list));
+      }
+    }, (err) => console.warn('Firestore parts listener fallback:', err));
 
     return () => { unsub1(); unsub2(); unsub3(); };
   }, [firebaseUser]);
 
-  // Helpers para guardar/actualizar/borrar documentos en Firestore
+  // Helpers para guardar/actualizar/borrar con fallback automático
   const firestoreAdd = async (colName, data) => {
-    if (!firebaseUser) return null;
-    const ref = collection(db, 'users', firebaseUser.uid, colName);
-    const docRef = await addDoc(ref, { ...data, createdAtMs: Date.now() });
-    return docRef.id;
+    const newItem = { ...data, id: String(Date.now()), createdAtMs: Date.now() };
+    
+    // Actualizar estado local inmediatamente
+    if (colName === 'vehicles') setVehicles(prev => [newItem, ...prev]);
+    if (colName === 'maintenances') setMaintenances(prev => [newItem, ...prev]);
+    if (colName === 'parts') setParts(prev => [newItem, ...prev]);
+
+    if (firebaseUser) {
+      const uid = firebaseUser.uid;
+      const key = `garageops_${colName}_${uid}`;
+      try {
+        const ref = collection(db, 'users', uid, colName);
+        const docRef = await addDoc(ref, newItem);
+        return docRef.id;
+      } catch (err) {
+        console.warn(`Firestore add ${colName} error, saving locally:`, err);
+        // Persistir en localStorage por usuario
+        const currentLocal = JSON.parse(localStorage.getItem(key) || '[]');
+        localStorage.setItem(key, JSON.stringify([newItem, ...currentLocal]));
+      }
+    }
+    return newItem.id;
   };
 
   const firestoreUpdate = async (colName, docId, data) => {
-    if (!firebaseUser) return;
-    const ref = doc(db, 'users', firebaseUser.uid, colName, docId);
-    await updateDoc(ref, data);
+    // Actualizar estado local inmediatamente
+    if (colName === 'vehicles') setVehicles(prev => prev.map(v => v.id === docId ? { ...v, ...data } : v));
+    if (colName === 'maintenances') setMaintenances(prev => prev.map(m => m.id === docId ? { ...m, ...data } : m));
+    if (colName === 'parts') setParts(prev => prev.map(p => p.id === docId ? { ...p, ...data } : p));
+
+    if (firebaseUser) {
+      const uid = firebaseUser.uid;
+      const key = `garageops_${colName}_${uid}`;
+      try {
+        const ref = doc(db, 'users', uid, colName, String(docId));
+        await updateDoc(ref, data);
+      } catch (err) {
+        console.warn(`Firestore update ${colName} error:`, err);
+        const currentLocal = JSON.parse(localStorage.getItem(key) || '[]');
+        const updated = currentLocal.map(item => String(item.id) === String(docId) ? { ...item, ...data } : item);
+        localStorage.setItem(key, JSON.stringify(updated));
+      }
+    }
   };
 
   const firestoreDelete = async (colName, docId) => {
-    if (!firebaseUser) return;
-    const ref = doc(db, 'users', firebaseUser.uid, colName, docId);
-    await deleteDoc(ref);
-  };
+    // Actualizar estado local inmediatamente
+    if (colName === 'vehicles') setVehicles(prev => prev.filter(v => v.id !== docId));
+    if (colName === 'maintenances') setMaintenances(prev => prev.filter(m => m.id !== docId));
+    if (colName === 'parts') setParts(prev => prev.filter(p => p.id !== docId));
 
-  const firestoreSet = async (colName, docId, data) => {
-    if (!firebaseUser) return;
-    const ref = doc(db, 'users', firebaseUser.uid, colName, docId);
-    await setDoc(ref, { ...data, createdAtMs: Date.now() }, { merge: true });
+    if (firebaseUser) {
+      const uid = firebaseUser.uid;
+      const key = `garageops_${colName}_${uid}`;
+      try {
+        const ref = doc(db, 'users', uid, colName, String(docId));
+        await deleteDoc(ref);
+      } catch (err) {
+        console.warn(`Firestore delete ${colName} error:`, err);
+        const currentLocal = JSON.parse(localStorage.getItem(key) || '[]');
+        const filtered = currentLocal.filter(item => String(item.id) !== String(docId));
+        localStorage.setItem(key, JSON.stringify(filtered));
+      }
+    }
   };
 
   // Estado de Idioma (es, en, it) con persistencia local
