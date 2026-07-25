@@ -520,7 +520,35 @@ export function App() {
       }
     }, (err) => console.warn('Firestore parts listener fallback:', err));
 
-    return () => { unsub1(); unsub2(); unsub3(); };
+    // Listener de colección de usuarios reales de Firestore para el Backoffice
+    const allUsersCol = collection(db, 'users');
+    const unsub4 = onSnapshot(allUsersCol, (snap) => {
+      if (!snap.empty) {
+        const realUsers = snap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            email: data.email || `user_${d.id.slice(0, 5)}@garageops.io`,
+            role: data.role || (data.email === 'demo@garageops.io' ? 'admin' : 'user'),
+            plan: data.plan || 'starter',
+            giftDays: data.giftDays || 0,
+            vehiclesCount: data.vehiclesCount || 1,
+            status: data.status || 'active',
+            registered: data.createdAt ? new Date(data.createdAt.seconds * 1000).toISOString().split('T')[0] : '2026-07-25'
+          };
+        });
+        
+        // Fusionar manteniendo únicos por email
+        setAllUsersList(prev => {
+          const map = new Map();
+          prev.forEach(u => map.set(u.email, u));
+          realUsers.forEach(u => map.set(u.email, { ...map.get(u.email), ...u }));
+          return Array.from(map.values());
+        });
+      }
+    }, (err) => console.warn('Firestore users collection listener fallback:', err));
+
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
   }, [firebaseUser]);
 
   // Helpers para guardar/actualizar/borrar con fallback automático
