@@ -419,6 +419,7 @@ export function App() {
   const [showGiftModal, setShowGiftModal] = useState(null); // usuario seleccionado para regalo
   const [giftDaysInput, setGiftDaysInput] = useState('30');
   const [giftPlanInput, setGiftPlanInput] = useState('unlimited');
+  const [inspectingUser, setInspectingUser] = useState(null); // usuario siendo inspeccionado en modo soporte
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
@@ -1428,6 +1429,31 @@ export function App() {
 
       {/* ÁREA DE CONTENIDO PRINCIPAL */}
       <main className="flex-1 max-w-6xl mx-auto w-full p-4 sm:p-6 md:p-8">
+        
+        {/* BANNER MODO INSPECCIÓN SOPORTE ADMIN */}
+        {inspectingUser && (
+          <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border-2 border-amber-500/40 text-amber-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xl animate-in slide-in-from-top duration-200">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center text-xl shrink-0">
+                👁️
+              </div>
+              <div>
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded">
+                  Modo Soporte Técnico / Inspección Activo
+                </span>
+                <p className="text-xs font-bold text-white mt-0.5">
+                  Estás inspeccionando el garaje de: <span className="font-mono text-orange-400 underline">{inspectingUser.email}</span>
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setInspectingUser(null)}
+              className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-zinc-950 font-extrabold text-xs shadow transition-all active:scale-95 whitespace-nowrap"
+            >
+              ✕ Salir de Modo Inspección
+            </button>
+          </div>
+        )}
         
         {/* Header Móvil */}
         <header className="flex md:hidden items-center justify-between pb-4 mb-5 border-b border-zinc-900">
@@ -2915,10 +2941,13 @@ export function App() {
                               🔑 Reset Clave
                             </button>
                             <button
-                              onClick={() => alert(`Modo soporte iniciado para ${u.email}. Inspeccionando garaje...`)}
-                              className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold text-[11px] border border-zinc-700 transition-all active:scale-95"
+                              onClick={() => {
+                                setInspectingUser(u);
+                                setActiveTab('dashboard');
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 font-bold text-[11px] border border-orange-500/30 transition-all active:scale-95 flex items-center gap-1"
                             >
-                              👁️ Inspeccionar
+                              <span>👁️ Inspeccionar</span>
                             </button>
                           </td>
                         </tr>
