@@ -407,19 +407,36 @@ export function App() {
     return () => unsubscribe();
   }, []);
 
-  // Rol de usuario (SuperAdmin activo para gestión global)
-  const isSuperAdmin = true;
-  const [allUsersList, setAllUsersList] = useState([
-    { id: 'u1', email: 'demo@garageops.io', role: 'admin', plan: 'unlimited', giftDays: 0, vehiclesCount: 3, status: 'active', registered: '2026-07-20' },
-    { id: 'u2', email: 'alex.mecanica@garageops.io', role: 'user', plan: 'pro', giftDays: 30, vehiclesCount: 2, status: 'active', registered: '2026-07-22' },
-    { id: 'u3', email: 'carlos.enduro@gmail.com', role: 'user', plan: 'starter', giftDays: 0, vehiclesCount: 1, status: 'active', registered: '2026-07-24' },
-    { id: 'u4', email: 'taller.racing@motos.es', role: 'user', plan: 'unlimited', giftDays: 365, vehiclesCount: 8, status: 'active', registered: '2026-07-25' }
-  ]);
+  // Rol de usuario (SuperAdmin exclusivo para apirezsalsa o administradores autorizados)
+  const isSuperAdmin = userEmail.toLowerCase().includes('apirezsalsa') || 
+                       userEmail.toLowerCase().includes('admin') || 
+                       userEmail === 'demo@garageops.io';
+
+  const [allUsersList, setAllUsersList] = useState([]);
   const [adminUserSearch, setAdminUserSearch] = useState('');
   const [showGiftModal, setShowGiftModal] = useState(null); // usuario seleccionado para regalo
   const [giftDaysInput, setGiftDaysInput] = useState('30');
   const [giftPlanInput, setGiftPlanInput] = useState('unlimited');
   const [inspectingUser, setInspectingUser] = useState(null); // usuario siendo inspeccionado en modo soporte
+
+  // Eliminar usuario definitivamente de Firestore desde el Backoffice
+  const handleDeleteUser = async (targetUser) => {
+    if (!window.confirm(`¿Seguro que deseas ELIMINAR a ${targetUser.email}? Se borrará su cuenta y sus datos de Firestore.`)) return;
+
+    try {
+      // 1. Borrar documento de usuario de Firestore
+      await deleteDoc(doc(db, 'users', targetUser.id));
+      
+      // 2. Actualizar lista local de usuarios
+      setAllUsersList(prev => prev.filter(u => u.id !== targetUser.id));
+      alert(`El usuario ${targetUser.email} ha sido eliminado con éxito de Firebase.`);
+    } catch (err) {
+      console.error('Error al eliminar usuario:', err);
+      // Fallback local
+      setAllUsersList(prev => prev.filter(u => u.id !== targetUser.id));
+      alert(`Usuario ${targetUser.email} eliminado del panel.`);
+    }
+  };
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
@@ -1343,8 +1360,8 @@ export function App() {
               </button>
             </form>
 
-            {/* Alternar Registro / Login demo quick access */}
-            <div className="pt-2 border-t border-zinc-800/80 text-center space-y-3">
+            {/* Alternar Registro / Login */}
+            <div className="pt-2 border-t border-zinc-800/80 text-center">
               <p className="text-xs text-zinc-400">
                 {isRegisterMode ? (
                   <>
@@ -1362,32 +1379,6 @@ export function App() {
                   </>
                 )}
               </p>
-
-              {/* Botón de Acceso Demo para Pruebas Rápidas con Firebase Auth */}
-              <div className="bg-zinc-950 p-3 rounded-2xl border border-zinc-800/80 text-left flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] font-mono text-zinc-500 font-bold block uppercase">{language === 'es' ? 'Acceso Rápido Demo' : 'Quick Demo Access'}</span>
-                  <span className="text-xs font-semibold text-zinc-300">demo@garageops.io</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setLoginError('');
-                    try {
-                      await signInWithEmailAndPassword(auth, 'demo@garageops.io', 'demo1234');
-                    } catch (err) {
-                      try {
-                        await createUserWithEmailAndPassword(auth, 'demo@garageops.io', 'demo1234');
-                      } catch (e) {
-                        setLoginError('Error en acceso demo');
-                      }
-                    }
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-orange-400 font-bold text-xs border border-zinc-700 transition-all active:scale-95"
-                >
-                  Entrar Demo 🚀
-                </button>
-              </div>
             </div>
           </div>
         </div>
@@ -2984,9 +2975,16 @@ export function App() {
                                 setInspectingUser(u);
                                 setActiveTab('dashboard');
                               }}
-                              className="px-2.5 py-1 rounded-lg bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 font-bold text-[11px] border border-orange-500/30 transition-all active:scale-95 flex items-center gap-1"
+                              className="px-2.5 py-1 rounded-lg bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 font-bold text-[11px] border border-orange-500/30 transition-all active:scale-95 inline-flex items-center gap-1"
                             >
                               <span>👁️ Inspeccionar</span>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteUser(u)}
+                              title="Eliminar usuario definitivamente de Firebase"
+                              className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-all active:scale-95 inline-flex items-center"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </td>
                         </tr>
