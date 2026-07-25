@@ -1,4 +1,24 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { auth, db } from './firebase';
+import { 
+  onAuthStateChanged, 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword, 
+  signOut 
+} from 'firebase/auth';
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  getDocs, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  onSnapshot,
+  query,
+  orderBy,
+  serverTimestamp 
+} from 'firebase/firestore';
 import { 
   Home, 
   Bike, 
@@ -365,131 +385,124 @@ export function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [photoPreviewModal, setPhotoPreviewModal] = useState(null);
   
-  // Estado de Autenticación de Usuario (Persistente)
-  const [isLoggedIn, setIsLoggedIn] = useState(() => {
-    return localStorage.getItem('garageops_logged_in') === 'true';
-  });
-  const [userEmail, setUserEmail] = useState(() => {
-    return localStorage.getItem('garageops_user_email') || 'alex.mecanica@garageops.io';
-  });
-  const [loginForm, setLoginForm] = useState({
-    email: '',
-    password: '',
-    rememberMe: true
-  });
+  // Estado de Autenticación Firebase
+  const [firebaseUser, setFirebaseUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [userEmail, setUserEmail] = useState('');
+  const [loginForm, setLoginForm] = useState({ email: '', password: '', rememberMe: true });
   const [loginError, setLoginError] = useState('');
   const [isRegisterMode, setIsRegisterMode] = useState(false);
 
-  const handleLoginSubmit = (e) => {
+  // Listener de sesión Firebase
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+      setUserEmail(user?.email || '');
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLoginSubmit = async (e) => {
     e.preventDefault();
-    if (!loginForm.email || !loginForm.password) {
-      setLoginError(language === 'es' ? 'Por favor completa todos los campos' : 'Please complete all fields');
-      return;
-    }
-    if (loginForm.password.length < 4) {
-      setLoginError(language === 'es' ? 'La contraseña debe tener al menos 4 caracteres' : 'Password must be at least 4 characters');
-      return;
-    }
-    setUserEmail(loginForm.email);
-    setIsLoggedIn(true);
     setLoginError('');
-    if (loginForm.rememberMe) {
-      localStorage.setItem('garageops_logged_in', 'true');
-      localStorage.setItem('garageops_user_email', loginForm.email);
+    if (!loginForm.email || !loginForm.password) {
+      setLoginError('Por favor completa todos los campos');
+      return;
     }
-  };
-
-  const handleLogout = () => {
-    setIsLoggedIn(false);
-    localStorage.removeItem('garageops_logged_in');
-  };
-
-  // Persistencia local (localStorage)
-  const [vehicles, setVehicles] = useState(() => {
-    const saved = localStorage.getItem('garageops_vehicles');
-    return saved ? JSON.parse(saved) : INITIAL_VEHICLES;
-  });
-
-  const [maintenances, setMaintenances] = useState(() => {
-    const saved = localStorage.getItem('garageops_maintenances');
-    return saved ? JSON.parse(saved) : INITIAL_MAINTENANCES;
-  });
-
-  const [parts, setParts] = useState(() => {
-    const saved = localStorage.getItem('garageops_parts');
-    if (!saved) return INITIAL_PARTS;
     try {
-      const parsed = JSON.parse(saved);
-      return parsed.map(p => ({
-        ...p,
-        compatibleVehicles: p.compatibleVehicles || (p.vehicle ? [p.vehicle] : ['Universal']),
-        purchases: p.purchases && Array.isArray(p.purchases) ? p.purchases : (
-          p.stock > 0 ? [{ id: Date.now(), qty: p.stock, pricePerUnit: parseFloat(p.price) || 0, supplier: 'Anterior', date: '2026-07-25' }] : []
-        )
-      }));
-    } catch (e) {
-      return INITIAL_PARTS;
-    }
-  });
-
-  // Guardar automáticamente en localStorage cuando haya cambios
-  React.useEffect(() => {
-    localStorage.setItem('garageops_vehicles', JSON.stringify(vehicles));
-  }, [vehicles]);
-
-  React.useEffect(() => {
-    localStorage.setItem('garageops_maintenances', JSON.stringify(maintenances));
-  }, [maintenances]);
-
-  React.useEffect(() => {
-    localStorage.setItem('garageops_parts', JSON.stringify(parts));
-  }, [parts]);
-
-  // Reconciliación de stock: aplica deducciones pendientes de mantenimientos anteriores (one-shot)
-  React.useEffect(() => {
-    const reconciled = localStorage.getItem('garageops_stock_reconciled_v2');
-    if (reconciled) return;
-
-    // Recopilar todas las deducciones que deberían haberse hecho
-    const deductions = {}; // { partId: totalQtyToDeduct }
-    maintenances.forEach(m => {
-      if (m.usedPartId && m.usedPartQty) {
-        const pid = String(m.usedPartId);
-        const qty = parseFloat(m.usedPartQty) || 0;
-        if (qty > 0) {
-          deductions[pid] = (deductions[pid] || 0) + qty;
-        }
+      if (isRegisterMode) {
+        const cred = await createUserWithEmailAndPassword(auth, loginForm.email, loginForm.password);
+        // Crear perfil en Firestore
+        await setDoc(doc(db, 'users', cred.user.uid), {
+          email: loginForm.email,
+          plan: 'pro',
+          createdAt: serverTimestamp()
+        });
+      } else {
+        await signInWithEmailAndPassword(auth, loginForm.email, loginForm.password);
       }
+    } catch (err) {
+      const errorMap = {
+        'auth/email-already-in-use': 'Este correo ya está registrado',
+        'auth/weak-password': 'La contraseña debe tener al menos 6 caracteres',
+        'auth/invalid-email': 'Correo electrónico no válido',
+        'auth/invalid-credential': 'Correo o contraseña incorrectos',
+        'auth/user-not-found': 'No existe una cuenta con ese correo',
+        'auth/wrong-password': 'Contraseña incorrecta'
+      };
+      setLoginError(errorMap[err.code] || err.message);
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
+
+  // Datos sincronizados con Firestore (por usuario)
+  const [vehicles, setVehicles] = useState([]);
+  const [maintenances, setMaintenances] = useState([]);
+  const [parts, setParts] = useState([]);
+
+  // Helper: referencia a subcolección del usuario actual
+  const userCol = useCallback((colName) => {
+    if (!firebaseUser) return null;
+    return collection(db, 'users', firebaseUser.uid, colName);
+  }, [firebaseUser]);
+
+  // Listeners Firestore en tiempo real
+  useEffect(() => {
+    if (!firebaseUser) {
+      setVehicles([]);
+      setMaintenances([]);
+      setParts([]);
+      return;
+    }
+
+    const vehiclesCol = collection(db, 'users', firebaseUser.uid, 'vehicles');
+    const maintCol = collection(db, 'users', firebaseUser.uid, 'maintenances');
+    const partsCol = collection(db, 'users', firebaseUser.uid, 'parts');
+
+    const unsub1 = onSnapshot(vehiclesCol, (snap) => {
+      setVehicles(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    const unsub2 = onSnapshot(maintCol, (snap) => {
+      const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      items.sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
+      setMaintenances(items);
+    });
+    const unsub3 = onSnapshot(partsCol, (snap) => {
+      setParts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    if (Object.keys(deductions).length === 0) {
-      localStorage.setItem('garageops_stock_reconciled_v2', 'true');
-      return;
-    }
+    return () => { unsub1(); unsub2(); unsub3(); };
+  }, [firebaseUser]);
 
-    // Aplicar deducciones FIFO sobre los lotes de compra
-    setParts(prevParts => prevParts.map(p => {
-      const pid = String(p.id);
-      if (!deductions[pid] || !p.purchases || p.purchases.length === 0) return p;
+  // Helpers para guardar/actualizar/borrar documentos en Firestore
+  const firestoreAdd = async (colName, data) => {
+    if (!firebaseUser) return null;
+    const ref = collection(db, 'users', firebaseUser.uid, colName);
+    const docRef = await addDoc(ref, { ...data, createdAtMs: Date.now() });
+    return docRef.id;
+  };
 
-      let qtyToDeduct = deductions[pid];
-      const updatedPurchases = p.purchases.map(batch => {
-        if (qtyToDeduct <= 0) return batch;
-        if (batch.qty >= qtyToDeduct) {
-          const remaining = Math.max(0, parseFloat((batch.qty - qtyToDeduct).toFixed(3)));
-          qtyToDeduct = 0;
-          return { ...batch, qty: remaining };
-        } else {
-          qtyToDeduct = parseFloat((qtyToDeduct - batch.qty).toFixed(3));
-          return { ...batch, qty: 0 };
-        }
-      }).filter(b => b.qty > 0);
+  const firestoreUpdate = async (colName, docId, data) => {
+    if (!firebaseUser) return;
+    const ref = doc(db, 'users', firebaseUser.uid, colName, docId);
+    await updateDoc(ref, data);
+  };
 
-      return { ...p, purchases: updatedPurchases };
-    }));
+  const firestoreDelete = async (colName, docId) => {
+    if (!firebaseUser) return;
+    const ref = doc(db, 'users', firebaseUser.uid, colName, docId);
+    await deleteDoc(ref);
+  };
 
-    localStorage.setItem('garageops_stock_reconciled_v2', 'true');
-  }, []); // Solo se ejecuta una vez al montar
+  const firestoreSet = async (colName, docId, data) => {
+    if (!firebaseUser) return;
+    const ref = doc(db, 'users', firebaseUser.uid, colName, docId);
+    await setDoc(ref, { ...data, createdAtMs: Date.now() }, { merge: true });
+  };
 
   // Estado de Idioma (es, en, it) con persistencia local
   const [language, setLanguage] = useState(() => {
@@ -596,14 +609,13 @@ export function App() {
     usageNum: ''
   });
 
-  const handleCreateVehicle = (e) => {
+  const handleCreateVehicle = async (e) => {
     e.preventDefault();
     if (!newVehicleForm.name) return;
 
     const newVehicle = {
-      id: Date.now(),
       name: newVehicleForm.name,
-      category: `${newVehicleForm.category}`,
+      category: newVehicleForm.category,
       icon: newVehicleForm.icon,
       photo: newVehicleForm.photo || null,
       usage: `${newVehicleForm.usageNum || 0} ${newVehicleForm.unit}`,
@@ -616,27 +628,21 @@ export function App() {
       borderColor: 'border-emerald-500/30'
     };
 
-    setVehicles(prev => [newVehicle, ...prev]);
+    await firestoreAdd('vehicles', newVehicle);
     setShowAddVehicleModal(false);
     setNewVehicleForm({ name: '', category: 'Mantenimiento por Km', unit: 'km', icon: '🏍️', photo: '', usageNum: '' });
   };
 
-  const handleUpdateKm = (e) => {
+  const handleUpdateKm = async (e) => {
     e.preventDefault();
     if (!showKmModal) return;
 
     const newNum = parseFloat(newKmValue) || 0;
 
-    setVehicles(prev => prev.map(v => {
-      if (v.id === showKmModal.id) {
-        return {
-          ...v,
-          usage: `${newNum} ${v.unit}`,
-          usageNum: newNum
-        };
-      }
-      return v;
-    }));
+    await firestoreUpdate('vehicles', showKmModal.id, {
+      usage: `${newNum} ${showKmModal.unit}`,
+      usageNum: newNum
+    });
 
     if (selectedVehicle && selectedVehicle.id === showKmModal.id) {
       setSelectedVehicle(prev => ({
@@ -658,8 +664,8 @@ export function App() {
     setConfirmModal({
       title: '¿Eliminar Vehículo?',
       message: `¿Seguro que deseas eliminar "${v?.name || 'este vehículo'}" de tu garaje? Esta acción no se puede deshacer.`,
-      onConfirm: () => {
-        setVehicles(prev => prev.filter(item => item.id !== vehicleId));
+      onConfirm: async () => {
+        await firestoreDelete('vehicles', vehicleId);
         if (selectedVehicle?.id === vehicleId) {
           setSelectedVehicle(null);
         }
@@ -672,8 +678,8 @@ export function App() {
     setConfirmModal({
       title: '¿Borrar Registro de Mantenimiento?',
       message: `¿Seguro que deseas eliminar el registro "${m?.title || 'esta intervención'}"?`,
-      onConfirm: () => {
-        setMaintenances(prev => prev.filter(item => item.id !== maintId));
+      onConfirm: async () => {
+        await firestoreDelete('maintenances', maintId);
       }
     });
   };
@@ -683,8 +689,8 @@ export function App() {
     setConfirmModal({
       title: '¿Eliminar Repuesto?',
       message: `¿Seguro que deseas eliminar el repuesto "${p?.name || 'esta pieza'}" del inventario?`,
-      onConfirm: () => {
-        setParts(prev => prev.filter(item => item.id !== partId));
+      onConfirm: async () => {
+        await firestoreDelete('parts', partId);
       }
     });
   };
@@ -713,24 +719,18 @@ export function App() {
     date: '2026-07-25'
   });
 
-  const handleCreateOrUpdatePart = (e) => {
+  const handleCreateOrUpdatePart = async (e) => {
     e.preventDefault();
     if (!newPartForm.name) return;
 
     const minStockNum = parseInt(newPartForm.minStock) || 0;
 
     if (editingPartId) {
-      setParts(prev => prev.map(p => {
-        if (p.id === editingPartId) {
-          return {
-            ...p,
-            name: newPartForm.name,
-            compatibleVehicles: newPartForm.compatibleVehicles.length > 0 ? newPartForm.compatibleVehicles : ['Universal'],
-            minStock: minStockNum
-          };
-        }
-        return p;
-      }));
+      await firestoreUpdate('parts', editingPartId, {
+        name: newPartForm.name,
+        compatibleVehicles: newPartForm.compatibleVehicles.length > 0 ? newPartForm.compatibleVehicles : ['Universal'],
+        minStock: minStockNum
+      });
     } else {
       const initialQtyNum = parseInt(newPartForm.initialQty) || 0;
       const initialPriceNum = parseFloat(newPartForm.initialPrice) || 0;
@@ -744,14 +744,13 @@ export function App() {
       }] : [];
 
       const newPart = {
-        id: Date.now(),
         name: newPartForm.name,
         compatibleVehicles: newPartForm.compatibleVehicles.length > 0 ? newPartForm.compatibleVehicles : ['Universal'],
         minStock: minStockNum,
         purchases: initialPurchase
       };
 
-      setParts(prev => [newPart, ...prev]);
+      await firestoreAdd('parts', newPart);
     }
 
     setShowAddPartModal(false);
@@ -767,7 +766,7 @@ export function App() {
     });
   };
 
-  const handleAddPurchaseBatch = (e) => {
+  const handleAddPurchaseBatch = async (e) => {
     e.preventDefault();
     if (!showBatchModal) return;
 
@@ -782,15 +781,11 @@ export function App() {
       date: newBatchForm.date || '2026-07-25'
     };
 
-    setParts(prev => prev.map(p => {
-      if (p.id === showBatchModal.id) {
-        return {
-          ...p,
-          purchases: [newBatch, ...(p.purchases || [])]
-        };
-      }
-      return p;
-    }));
+    const targetPart = parts.find(p => p.id === showBatchModal.id);
+    if (targetPart) {
+      const updatedPurchases = [newBatch, ...(targetPart.purchases || [])];
+      await firestoreUpdate('parts', targetPart.id, { purchases: updatedPurchases });
+    }
 
     setShowBatchModal(null);
     setNewBatchForm({ qty: '1', pricePerUnit: '', supplier: '', date: '2026-07-25' });
@@ -828,49 +823,40 @@ export function App() {
     mechanic: ''
   });
 
-  const handleCreateOrUpdateMaintenance = (e) => {
+  const handleCreateOrUpdateMaintenance = async (e) => {
     e.preventDefault();
     if (!newMaintenanceForm.title) return;
 
     const targetVehicle = newMaintenanceForm.vehicle || selectedVehicle?.name || vehicles[0]?.name;
     const currentVehObj = vehicles.find(v => v.name.toLowerCase() === targetVehicle.toLowerCase());
 
-    // Si se seleccionó un repuesto del inventario, descontar stock de los lotes de compra (FIFO)
-    if (newMaintenanceForm.selectedPartId) {
-      const targetPartIdStr = String(newMaintenanceForm.selectedPartId);
-      let qtyToDeduct = parseFloat(newMaintenanceForm.partQty) || 1;
+    // Si se seleccionó un repuesto del inventario, descontar stock FIFO en Firestore
+    if (newMaintenanceForm.selectedPartId && !editingMaintenanceId) {
+      const targetPart = parts.find(p => String(p.id) === String(newMaintenanceForm.selectedPartId));
+      if (targetPart && targetPart.purchases && targetPart.purchases.length > 0) {
+        let qtyToDeduct = parseFloat(newMaintenanceForm.partQty) || 1;
+        const updatedPurchases = targetPart.purchases.map(batch => {
+          if (qtyToDeduct <= 0) return batch;
+          if (batch.qty >= qtyToDeduct) {
+            const remaining = Math.max(0, parseFloat((batch.qty - qtyToDeduct).toFixed(3)));
+            qtyToDeduct = 0;
+            return { ...batch, qty: remaining };
+          } else {
+            qtyToDeduct = parseFloat((qtyToDeduct - batch.qty).toFixed(3));
+            return { ...batch, qty: 0 };
+          }
+        }).filter(b => b.qty > 0);
 
-      setParts(prevParts => prevParts.map(p => {
-        if (String(p.id) === targetPartIdStr && p.purchases && p.purchases.length > 0) {
-          const updatedPurchases = p.purchases.map(batch => {
-            if (qtyToDeduct <= 0) return batch;
-            if (batch.qty >= qtyToDeduct) {
-              const remaining = Math.max(0, parseFloat((batch.qty - qtyToDeduct).toFixed(3)));
-              qtyToDeduct = 0;
-              return { ...batch, qty: remaining };
-            } else {
-              const remDeduct = parseFloat((qtyToDeduct - batch.qty).toFixed(3));
-              qtyToDeduct = remDeduct;
-              return { ...batch, qty: 0 };
-            }
-          }).filter(b => b.qty > 0);
-
-          return {
-            ...p,
-            purchases: updatedPurchases
-          };
-        }
-        return p;
-      }));
+        await firestoreUpdate('parts', targetPart.id, { purchases: updatedPurchases });
+      }
     }
 
     const totalCostNum = (parseFloat(newMaintenanceForm.partsCost) || 0) + (parseFloat(newMaintenanceForm.laborCost) || 0);
-    const finalCostStr = totalCostNum > 0 ? `${totalCostNum.toFixed(2)} €` : (newMaintenanceForm.partsCost || newMaintenanceForm.laborCost ? `${totalCostNum.toFixed(2)} €` : '0.00 €');
+    const finalCostStr = totalCostNum > 0 ? `${totalCostNum.toFixed(2)} €` : '0.00 €';
 
     const selectedPartObj = parts.find(p => String(p.id) === String(newMaintenanceForm.selectedPartId));
 
     const maintenanceData = {
-      id: editingMaintenanceId || Date.now(),
       vehicle: targetVehicle,
       title: newMaintenanceForm.title,
       category: newMaintenanceForm.category,
@@ -878,7 +864,7 @@ export function App() {
       usedPartId: newMaintenanceForm.selectedPartId || null,
       usedPartName: selectedPartObj ? selectedPartObj.name : null,
       usedPartQty: newMaintenanceForm.partQty || '1',
-      date: newMaintenanceForm.date || '25 Jul 2026',
+      date: newMaintenanceForm.date || new Date().toISOString().split('T')[0],
       cost: finalCostStr,
       partsCost: newMaintenanceForm.partsCost ? `${parseFloat(newMaintenanceForm.partsCost).toFixed(2)} €` : '0.00 €',
       laborCost: newMaintenanceForm.laborCost ? `${parseFloat(newMaintenanceForm.laborCost).toFixed(2)} €` : '0.00 €',
@@ -895,25 +881,19 @@ export function App() {
     };
 
     if (editingMaintenanceId) {
-      setMaintenances(prev => prev.map(m => m.id === editingMaintenanceId ? maintenanceData : m));
+      await firestoreUpdate('maintenances', editingMaintenanceId, maintenanceData);
     } else {
-      setMaintenances(prev => [maintenanceData, ...prev]);
+      await firestoreAdd('maintenances', maintenanceData);
     }
 
-    // Si se especificó una nueva lectura de uso al hacer el servicio, actualizar la lectura del vehículo automáticamente
+    // Si se especificó una nueva lectura de uso, actualizar el vehículo en Firestore
     if (newMaintenanceForm.usageAtService && currentVehObj) {
       const newNum = parseFloat(newMaintenanceForm.usageAtService);
       if (!isNaN(newNum)) {
-        setVehicles(prev => prev.map(v => {
-          if (v.id === currentVehObj.id) {
-            return {
-              ...v,
-              usage: `${newNum} ${v.unit}`,
-              usageNum: newNum
-            };
-          }
-          return v;
-        }));
+        await firestoreUpdate('vehicles', currentVehObj.id, {
+          usage: `${newNum} ${currentVehObj.unit}`,
+          usageNum: newNum
+        });
 
         if (selectedVehicle && selectedVehicle.id === currentVehObj.id) {
           setSelectedVehicle(prev => ({
@@ -1123,7 +1103,18 @@ export function App() {
     requestDeletePart(partId);
   };
 
-  if (!isLoggedIn) {
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
+          <span className="text-xs font-mono text-zinc-400">Cargando GarageOps...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!firebaseUser) {
     return (
       <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans flex items-center justify-center p-4 selection:bg-orange-500 selection:text-white">
         <div className="w-full max-w-md space-y-6">
@@ -1246,18 +1237,25 @@ export function App() {
                 )}
               </p>
 
-              {/* Botón de Acceso Demo para Pruebas Rápidas */}
+              {/* Botón de Acceso Demo para Pruebas Rápidas con Firebase Auth */}
               <div className="bg-zinc-950 p-3 rounded-2xl border border-zinc-800/80 text-left flex items-center justify-between">
                 <div>
                   <span className="text-[10px] font-mono text-zinc-500 font-bold block uppercase">{language === 'es' ? 'Acceso Rápido Demo' : 'Quick Demo Access'}</span>
-                  <span className="text-xs font-semibold text-zinc-300">alex.mecanica@garageops.io</span>
+                  <span className="text-xs font-semibold text-zinc-300">demo@garageops.io</span>
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    setUserEmail('alex.mecanica@garageops.io');
-                    setIsLoggedIn(true);
-                    localStorage.setItem('garageops_logged_in', 'true');
+                  onClick={async () => {
+                    setLoginError('');
+                    try {
+                      await signInWithEmailAndPassword(auth, 'demo@garageops.io', 'demo1234');
+                    } catch (err) {
+                      try {
+                        await createUserWithEmailAndPassword(auth, 'demo@garageops.io', 'demo1234');
+                      } catch (e) {
+                        setLoginError('Error en acceso demo');
+                      }
+                    }
                   }}
                   className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-orange-400 font-bold text-xs border border-zinc-700 transition-all active:scale-95"
                 >
