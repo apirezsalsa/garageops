@@ -42,7 +42,11 @@ import {
   ShieldAlert,
   Sliders,
   Trash2,
-  Edit2
+  Edit2,
+  Shield,
+  Users,
+  BarChart3,
+  Lock
 } from 'lucide-react';
 
 // --- MOCK DATA MEJORADO ---
@@ -402,6 +406,16 @@ export function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // Rol de usuario (SuperAdmin para demo@garageops.io o emails autorizados)
+  const isSuperAdmin = userEmail === 'demo@garageops.io' || userEmail.toLowerCase().includes('admin') || userEmail.toLowerCase().includes('andres');
+  const [allUsersList, setAllUsersList] = useState([
+    { id: 'u1', email: 'demo@garageops.io', role: 'admin', plan: 'unlimited', vehiclesCount: 3, status: 'active', registered: '2026-07-20' },
+    { id: 'u2', email: 'alex.mecanica@garageops.io', role: 'user', plan: 'pro', vehiclesCount: 2, status: 'active', registered: '2026-07-22' },
+    { id: 'u3', email: 'carlos.enduro@gmail.com', role: 'user', plan: 'starter', vehiclesCount: 1, status: 'active', registered: '2026-07-24' },
+    { id: 'u4', email: 'taller.racing@motos.es', role: 'user', plan: 'unlimited', vehiclesCount: 8, status: 'active', registered: '2026-07-25' }
+  ]);
+  const [adminUserSearch, setAdminUserSearch] = useState('');
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
@@ -1363,6 +1377,15 @@ export function App() {
             <NavItem icon={Bike} label={t('garage')} badge={vehicles.length} active={activeTab === 'garage'} onClick={() => { setActiveTab('garage'); setSelectedVehicle(null); }} />
             <NavItem icon={Wrench} label={t('parts')} badge={parts.length} active={activeTab === 'parts'} onClick={() => { setActiveTab('parts'); setSelectedVehicle(null); }} />
             <NavItem icon={History} label={t('history')} active={activeTab === 'history'} onClick={() => { setActiveTab('history'); setSelectedVehicle(null); }} />
+            {isSuperAdmin && (
+              <NavItem 
+                icon={Shield} 
+                label="Backoffice Admin" 
+                badge="ADMIN" 
+                active={activeTab === 'admin'} 
+                onClick={() => { setActiveTab('admin'); setSelectedVehicle(null); }} 
+              />
+            )}
           </nav>
         </div>
 
@@ -2695,6 +2718,181 @@ export function App() {
                   <span>📥 {t('importJson')}</span>
                   <input type="file" accept=".json" onChange={handleImportJSON} className="hidden" />
                 </label>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* VISTA 6: BACKOFFICE DE ADMINISTRACIÓN SAAS */}
+        {activeTab === 'admin' && isSuperAdmin && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-orange-400 bg-orange-500/10 px-2.5 py-1 rounded-lg border border-orange-500/20">
+                    Panel de SuperAdmin
+                  </span>
+                </div>
+                <h2 className="text-2xl font-extrabold text-white tracking-tight mt-1">
+                  🛡️ Backoffice de Administración
+                </h2>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Control global de usuarios, estado de suscripciones SaaS y métricas de plataforma.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => alert('Generando informe global en CSV...')}
+                  className="px-3.5 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-xs font-bold text-zinc-300 hover:text-white transition-all flex items-center gap-1.5"
+                >
+                  <FileText className="w-3.5 h-3.5 text-orange-400" />
+                  <span>Exportar Reporte SaaS</span>
+                </button>
+              </div>
+            </div>
+
+            {/* TARJETAS BENTO KPI ADMIN */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-zinc-900/80 p-4 rounded-3xl border border-zinc-800 space-y-1">
+                <div className="flex items-center justify-between text-zinc-400 text-xs">
+                  <span>Usuarios Totales</span>
+                  <Users className="w-4 h-4 text-blue-400" />
+                </div>
+                <p className="text-2xl font-black text-white font-mono">{allUsersList.length}</p>
+                <span className="text-[10px] text-emerald-400 font-semibold font-mono">↑ 100% este mes</span>
+              </div>
+
+              <div className="bg-zinc-900/80 p-4 rounded-3xl border border-zinc-800 space-y-1">
+                <div className="flex items-center justify-between text-zinc-400 text-xs">
+                  <span>Vehículos en Plataforma</span>
+                  <Bike className="w-4 h-4 text-amber-400" />
+                </div>
+                <p className="text-2xl font-black text-white font-mono">
+                  {allUsersList.reduce((acc, u) => acc + u.vehiclesCount, 0)}
+                </p>
+                <span className="text-[10px] text-zinc-500 font-mono">Promedio: 3.5 veh/usr</span>
+              </div>
+
+              <div className="bg-zinc-900/80 p-4 rounded-3xl border border-zinc-800 space-y-1">
+                <div className="flex items-center justify-between text-zinc-400 text-xs">
+                  <span>MRR Estimado</span>
+                  <Zap className="w-4 h-4 text-emerald-400" />
+                </div>
+                <p className="text-2xl font-black text-emerald-400 font-mono">28.96 €</p>
+                <span className="text-[10px] text-zinc-400 font-mono">Ingresos Recurrentes</span>
+              </div>
+
+              <div className="bg-zinc-900/80 p-4 rounded-3xl border border-zinc-800 space-y-1">
+                <div className="flex items-center justify-between text-zinc-400 text-xs">
+                  <span>Conversión a Pro</span>
+                  <TrendingUp className="w-4 h-4 text-purple-400" />
+                </div>
+                <p className="text-2xl font-black text-white font-mono">75 %</p>
+                <span className="text-[10px] text-purple-400 font-mono">Planes De Pago</span>
+              </div>
+            </div>
+
+            {/* TABLA DE GESTIÓN DE USUARIOS */}
+            <div className="bg-zinc-900/80 p-6 rounded-3xl border border-zinc-800 space-y-4 shadow-xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-zinc-800">
+                <div>
+                  <h3 className="font-bold text-base text-white flex items-center gap-2">
+                    <Users className="w-4 h-4 text-orange-400" />
+                    <span>Directorio de Usuarios Registrados</span>
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">Asigna planes, modifica estados de acceso o audita cuentas.</p>
+                </div>
+
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Buscar por email..."
+                    value={adminUserSearch}
+                    onChange={(e) => setAdminUserSearch(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-zinc-200 outline-none focus:border-orange-500"
+                  />
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-zinc-800 text-zinc-500 font-mono text-[10px] uppercase">
+                      <th className="pb-3 pl-2">Usuario / Email</th>
+                      <th className="pb-3">Rol</th>
+                      <th className="pb-3">Plan SaaS</th>
+                      <th className="pb-3">Vehículos</th>
+                      <th className="pb-3">Registro</th>
+                      <th className="pb-3">Estado</th>
+                      <th className="pb-3 text-right pr-2">Acciones Admin</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800/60">
+                    {allUsersList
+                      .filter(u => u.email.toLowerCase().includes(adminUserSearch.toLowerCase()))
+                      .map((u) => (
+                        <tr key={u.id} className="hover:bg-zinc-800/30 transition-colors">
+                          <td className="py-3 pl-2 font-bold text-white font-mono flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 flex items-center justify-center font-bold text-xs">
+                              {u.email.charAt(0).toUpperCase()}
+                            </div>
+                            <span>{u.email}</span>
+                          </td>
+                          <td className="py-3">
+                            <span className={`px-2 py-0.5 rounded font-mono text-[10px] font-bold ${
+                              u.role === 'admin' ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' : 'bg-zinc-800 text-zinc-400'
+                            }`}>
+                              {u.role.toUpperCase()}
+                            </span>
+                          </td>
+                          <td className="py-3">
+                            <select
+                              value={u.plan}
+                              onChange={(e) => {
+                                const newPlan = e.target.value;
+                                setAllUsersList(prev => prev.map(item => item.id === u.id ? { ...item, plan: newPlan } : item));
+                              }}
+                              className="bg-zinc-950 border border-zinc-800 text-zinc-200 rounded-lg px-2 py-1 text-xs font-semibold outline-none focus:border-orange-500"
+                            >
+                              <option value="starter">DIY Starter (0€)</option>
+                              <option value="pro">DIY Garage (4.99€)</option>
+                              <option value="unlimited">Garage Unlimited (9.99€)</option>
+                            </select>
+                          </td>
+                          <td className="py-3 font-mono font-bold text-zinc-300">
+                            {u.vehiclesCount} veh.
+                          </td>
+                          <td className="py-3 font-mono text-zinc-500 text-[11px]">
+                            {u.registered}
+                          </td>
+                          <td className="py-3">
+                            <button
+                              onClick={() => {
+                                setAllUsersList(prev => prev.map(item => item.id === u.id ? { ...item, status: item.status === 'active' ? 'suspended' : 'active' } : item));
+                              }}
+                              className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-bold transition-all ${
+                                u.status === 'active' 
+                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-rose-500/20 hover:text-rose-400' 
+                                  : 'bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-emerald-500/20 hover:text-emerald-400'
+                              }`}
+                            >
+                              {u.status === 'active' ? '● ACTIVO' : '✕ SUSPENDIDO'}
+                            </button>
+                          </td>
+                          <td className="py-3 text-right pr-2 space-x-1">
+                            <button
+                              onClick={() => alert(`Modo soporte iniciado para ${u.email}. Inspeccionando garaje...`)}
+                              className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold text-[11px] border border-zinc-700 transition-all active:scale-95"
+                            >
+                              👁️ Inspeccionar
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
