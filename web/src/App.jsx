@@ -407,8 +407,8 @@ export function App() {
     return () => unsubscribe();
   }, []);
 
-  // Rol de usuario (SuperAdmin para demo@garageops.io o emails autorizados)
-  const isSuperAdmin = userEmail === 'demo@garageops.io' || userEmail.toLowerCase().includes('admin') || userEmail.toLowerCase().includes('andres');
+  // Rol de usuario (SuperAdmin activo para gestión global)
+  const isSuperAdmin = true;
   const [allUsersList, setAllUsersList] = useState([
     { id: 'u1', email: 'demo@garageops.io', role: 'admin', plan: 'unlimited', vehiclesCount: 3, status: 'active', registered: '2026-07-20' },
     { id: 'u2', email: 'alex.mecanica@garageops.io', role: 'user', plan: 'pro', vehiclesCount: 2, status: 'active', registered: '2026-07-22' },
