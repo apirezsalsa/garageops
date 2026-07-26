@@ -10,9 +10,8 @@ import {
   collection, 
   doc, 
   setDoc, 
-  getDocs, 
-  addDoc, 
-  updateDoc, 
+  getDocs,
+  updateDoc,
   deleteDoc, 
   onSnapshot,
   query,
@@ -807,9 +806,12 @@ export function App() {
     if (uid) {
       const key = `garageops_${colName}_${uid}`;
       try {
-        const ref = collection(db, colName);
-        const docRef = await addDoc(ref, newItem);
-        return docRef.id;
+        // Usamos setDoc con ID determinista para que el ID local coincida con el
+        // ID del documento en Firestore (addDoc generaba uno distinto, provocando
+        // que update/delete inmediatos tras crear apuntaran al doc equivocado).
+        const ref = doc(db, colName, newItem.id);
+        await setDoc(ref, newItem);
+        return newItem.id;
       } catch (err) {
         console.warn(`Firestore add ${colName} error, saving locally:`, err);
         // Persistir en localStorage por usuario
