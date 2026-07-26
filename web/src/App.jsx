@@ -16,6 +16,7 @@ import {
   deleteDoc, 
   onSnapshot,
   query,
+  where,
   orderBy,
   serverTimestamp 
 } from 'firebase/firestore';
@@ -361,6 +362,202 @@ const TRANSLATIONS = {
   }
 };
 
+// Traducciones adicionales: Français, Deutsch, Português
+TRANSLATIONS.fr = {
+  dashboard: 'Tableau de bord',
+  garage: 'Garage',
+  parts: 'Pièces',
+  history: 'Historique Entretien',
+  settings: 'Paramètres & Plan',
+  activePlan: 'Plan Actif',
+  vehicles: 'Véhicules',
+  activeAlerts: 'Alertes Actives',
+  partsStock: 'Stock Pièces',
+  totalSpent: 'Dépenses Totales',
+  profileTitle: 'Profil & Paramètres',
+  profileSub: 'Langue, compte et paramètres du plan d\'abonnement.',
+  appLang: 'Langue de l\'Application',
+  selectLang: 'Sélectionnez votre langue préférée',
+  activeSub: 'Abonnement Actif',
+  billingCycle: 'Fréquence de Facturation',
+  monthly: 'Mensuel',
+  annual: 'Annuel',
+  planStarterDesc: 'Pour votre véhicule principal',
+  planProDesc: 'Particuliers avec 2 à 4 véhicules',
+  planUnlimitedDesc: 'Sans limites pour grand garage',
+  stripePortal: 'Portail de Facturation Stripe',
+  downloadPdf: 'Télécharger Factures PDF',
+  updateUsage: 'Mettre à jour',
+  addIntervention: '+ Enregistrer Intervention',
+  addAlert: '+ Programmer Alerte',
+  deleteVehicle: 'Supprimer Véhicule',
+  noAlerts: 'Aucune alerte programmée.',
+  backToGarage: '← Retour au Garage',
+  scheduledAlerts: 'ALERTES PROGRAMMÉES',
+  vehicleHistoryTitle: 'HISTORIQUE DU VÉHICULE',
+  partsLabel: 'Pièces:',
+  usage: 'Usage:',
+  spent: 'Dépense:',
+  changePhoto: 'Changer',
+  photo: 'Photo',
+  newAlert: '+ Nouvelle Alerte',
+  target: 'Objectif:',
+  overdueBy: 'Dépassé de',
+  remaining: 'Reste',
+  addAlertShort: '+ Alerte',
+  updateUnit: 'Actualiser',
+  allVehiclesTitle: 'GARAGE COMPLET',
+  addVehicleBtn: '+ Ajouter Véhicule',
+  noVehiclesMsg: 'Aucun véhicule enregistré dans votre garage.',
+  partsTitle: 'INVENTAIRE DES PIÈCES',
+  addPartBtn: '+ Ajouter Pièce',
+  historyTitle: 'HISTORIQUE GLOBAL DES INTERVENTIONS',
+  byKm: 'Par Km',
+  byHours: 'Par Heures',
+  maintByKm: 'Entretien par Km',
+  maintByHours: 'Entretien par Heures',
+  exportPdfBtn: 'Exporter Certificat PDF',
+  backupSection: 'Sauvegardes & Données',
+  backupDesc: 'Exportez ou importez vos données en JSON / CSV',
+  exportJson: 'Exporter Backup JSON',
+  exportCsv: 'Exporter Entretiens (CSV)',
+  importJson: 'Restaurer Backup JSON',
+  analyticsTitle: 'Analyse Financière du Garage',
+  laborCost: 'Main d\'Œuvre',
+  partsCostLabel: 'Pièces & Composants',
+  notificationsTitle: 'Notifications Actives du Garage'
+};
+
+TRANSLATIONS.de = {
+  dashboard: 'Übersicht',
+  garage: 'Garage',
+  parts: 'Ersatzteile',
+  history: 'Wartungsverlauf',
+  settings: 'Einstellungen & Plan',
+  activePlan: 'Aktiver Plan',
+  vehicles: 'Fahrzeuge',
+  activeAlerts: 'Aktive Warnungen',
+  partsStock: 'Teile-Bestand',
+  totalSpent: 'Gesamtausgaben',
+  profileTitle: 'Profil & Einstellungen',
+  profileSub: 'Sprache, Konto und Abonnement-Plan.',
+  appLang: 'App-Sprache',
+  selectLang: 'Bevorzugte Sprache wählen',
+  activeSub: 'Aktives Abonnement',
+  billingCycle: 'Abrechnungszeitraum',
+  monthly: 'Monatlich',
+  annual: 'Jährlich',
+  planStarterDesc: 'Für dein Hauptfahrzeug',
+  planProDesc: 'Für 2-4 Fahrzeuge',
+  planUnlimitedDesc: 'Unbegrenzt für große Garagen',
+  stripePortal: 'Stripe-Abrechnungsportal',
+  downloadPdf: 'Rechnungen als PDF herunterladen',
+  updateUsage: 'Aktualisieren',
+  addIntervention: '+ Wartung Erfassen',
+  addAlert: '+ Warnung Planen',
+  deleteVehicle: 'Fahrzeug Löschen',
+  noAlerts: 'Keine geplanten Warnungen.',
+  backToGarage: '← Zurück zur Garage',
+  scheduledAlerts: 'GEPLANTE WARNUNGEN',
+  vehicleHistoryTitle: 'FAHRZEUGVERLAUF',
+  partsLabel: 'Teile:',
+  usage: 'Nutzung:',
+  spent: 'Kosten:',
+  changePhoto: 'Ändern',
+  photo: 'Foto',
+  newAlert: '+ Neue Warnung',
+  target: 'Ziel:',
+  overdueBy: 'Überfällig um',
+  remaining: 'Verbleibend',
+  addAlertShort: '+ Warnung',
+  updateUnit: 'Aktualisieren',
+  allVehiclesTitle: 'KOMPLETTE GARAGE',
+  addVehicleBtn: '+ Fahrzeug Hinzufügen',
+  noVehiclesMsg: 'Keine Fahrzeuge in deiner Garage registriert.',
+  partsTitle: 'ERSATZTEIL-INVENTAR',
+  addPartBtn: '+ Teil Hinzufügen',
+  historyTitle: 'GLOBALER WARTUNGSVERLAUF',
+  byKm: 'Nach Km',
+  byHours: 'Nach Stunden',
+  maintByKm: 'Wartung nach Km',
+  maintByHours: 'Wartung nach Stunden',
+  exportPdfBtn: 'PDF-Zertifikat Exportieren',
+  backupSection: 'Datensicherung & Daten',
+  backupDesc: 'Exportiere oder importiere deine Daten als JSON / CSV',
+  exportJson: 'JSON-Backup Exportieren',
+  exportCsv: 'Wartungen (CSV) Exportieren',
+  importJson: 'JSON-Backup Wiederherstellen',
+  analyticsTitle: 'Finanzübersicht der Garage',
+  laborCost: 'Arbeitskosten',
+  partsCostLabel: 'Teile & Zubehör',
+  notificationsTitle: 'Aktive Garage-Benachrichtigungen'
+};
+
+TRANSLATIONS.pt = {
+  dashboard: 'Painel',
+  garage: 'Garagem',
+  parts: 'Peças',
+  history: 'Histórico Manutenção',
+  settings: 'Definições & Plano',
+  activePlan: 'Plano Ativo',
+  vehicles: 'Veículos',
+  activeAlerts: 'Alertas Ativos',
+  partsStock: 'Stock Peças',
+  totalSpent: 'Total Gasto',
+  profileTitle: 'Perfil & Definições',
+  profileSub: 'Idioma, conta e definições do plano de subscrição.',
+  appLang: 'Idioma da Aplicação',
+  selectLang: 'Selecione o seu idioma preferido',
+  activeSub: 'Subscrição Ativa',
+  billingCycle: 'Frequência de Faturação',
+  monthly: 'Mensal',
+  annual: 'Anual',
+  planStarterDesc: 'Para o seu veículo principal',
+  planProDesc: 'Particulares com 2 a 4 veículos',
+  planUnlimitedDesc: 'Sem limites para grande garagem',
+  stripePortal: 'Portal de Faturação Stripe',
+  downloadPdf: 'Descarregar Faturas PDF',
+  updateUsage: 'Atualizar',
+  addIntervention: '+ Registar Intervenção',
+  addAlert: '+ Programar Alerta',
+  deleteVehicle: 'Eliminar Veículo',
+  noAlerts: 'Sem alertas programados.',
+  backToGarage: '← Voltar à Garagem',
+  scheduledAlerts: 'ALERTAS PROGRAMADOS',
+  vehicleHistoryTitle: 'HISTÓRICO DO VEÍCULO',
+  partsLabel: 'Peças:',
+  usage: 'Uso:',
+  spent: 'Gasto:',
+  changePhoto: 'Alterar',
+  photo: 'Foto',
+  newAlert: '+ Novo Alerta',
+  target: 'Objetivo:',
+  overdueBy: 'Ultrapassado em',
+  remaining: 'Faltam',
+  addAlertShort: '+ Alerta',
+  updateUnit: 'Atualizar',
+  allVehiclesTitle: 'GARAGEM COMPLETA',
+  addVehicleBtn: '+ Adicionar Veículo',
+  noVehiclesMsg: 'Não tem veículos registados na sua garagem.',
+  partsTitle: 'INVENTÁRIO DE PEÇAS',
+  addPartBtn: '+ Registar Peça',
+  historyTitle: 'HISTÓRICO GLOBAL DE INTERVENÇÕES',
+  byKm: 'Por Km',
+  byHours: 'Por Horas',
+  maintByKm: 'Manutenção por Km',
+  maintByHours: 'Manutenção por Horas',
+  exportPdfBtn: 'Exportar Certificado PDF',
+  backupSection: 'Cópias de Segurança & Dados',
+  backupDesc: 'Exporte ou importe os seus dados em JSON / CSV',
+  exportJson: 'Exportar Backup JSON',
+  exportCsv: 'Exportar Manutenções (CSV)',
+  importJson: 'Restaurar Backup JSON',
+  analyticsTitle: 'Análise Financeira da Garagem',
+  laborCost: 'Mão de Obra',
+  partsCostLabel: 'Peças & Componentes',
+  notificationsTitle: 'Notificações Ativas da Garagem'
+};
+
 // Función auxiliar para traducir descripciones de categoría de vehículos
 const translateCategory = (categoryStr, lang) => {
   if (!categoryStr) return '';
@@ -393,6 +590,7 @@ export function App() {
   const [firebaseUser, setFirebaseUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [userEmail, setUserEmail] = useState('');
+  const [userProfile, setUserProfile] = useState(null); // Perfil real leído de Firestore
   const [loginForm, setLoginForm] = useState({ email: '', password: '', rememberMe: true });
   const [loginError, setLoginError] = useState('');
   const [isRegisterMode, setIsRegisterMode] = useState(false);
@@ -418,15 +616,28 @@ export function App() {
         } catch (e) {
           console.warn('Error al sincronizar documento de usuario en Firestore:', e);
         }
+
+        // Leer perfil real de Firestore (incluye role y plan actualizados)
+        const profileSnap = await import('firebase/firestore').then(({ getDoc }) => getDoc(userDocRef)).catch(() => null);
+        if (profileSnap && profileSnap.exists()) {
+          setUserProfile(profileSnap.data());
+        }
+      } else {
+        setUserProfile(null);
       }
     });
     return () => unsubscribe();
   }, []);
 
-  // Rol de usuario (SuperAdmin exclusivo para apirezsalsa o administradores autorizados)
-  const isSuperAdmin = userEmail.toLowerCase().includes('apirezsalsa') || 
-                       userEmail.toLowerCase().includes('admin') || 
-                       userEmail === 'demo@garageops.io';
+  // Rol SuperAdmin: fuente de verdad = campo role en Firestore.
+  // Fallback al check de email mientras el perfil carga (evita parpadeo en UI para admins reales).
+  const isSuperAdmin = 
+    userProfile?.role === 'admin' ||          // Firestore (fuente de verdad)
+    userProfile?.plan === 'unlimited' ||      // Plan unlimited también es admin
+    userEmail === 'demo@garageops.io' ||      // Cuenta demo especial
+    (userProfile === null && (                // Fallback mientras carga el perfil
+      userEmail.toLowerCase().includes('apirezsalsa')
+    ));
 
   const [allUsersList, setAllUsersList] = useState([
     { id: 'apirezsalsa_u', email: 'apirezsalsa@garageops.io', role: 'admin', plan: 'unlimited', giftDays: 365, vehiclesCount: 2, status: 'active', registered: '2026-07-25' },
@@ -499,13 +710,13 @@ export function App() {
   const [maintenances, setMaintenances] = useState([]);
   const [parts, setParts] = useState([]);
 
-  // Helper: referencia a subcolección del usuario actual
+  // Helper: referencia a colección raíz filtrada por usuario
   const userCol = useCallback((colName) => {
     if (!firebaseUser) return null;
-    return collection(db, 'users', firebaseUser.uid, colName);
+    return collection(db, colName);
   }, [firebaseUser]);
 
-  // Listeners Firestore en tiempo real con fallback resiliente a localStorage
+  // Listeners Firestore en tiempo real — colecciones raíz filtradas por userId
   useEffect(() => {
     if (!firebaseUser) {
       setVehicles([]);
@@ -524,37 +735,32 @@ export function App() {
     const savedMaint = localStorage.getItem(localMaintKey);
     const savedParts = localStorage.getItem(localPartsKey);
 
-    setVehicles(savedVeh ? JSON.parse(savedVeh) : INITIAL_VEHICLES);
-    setMaintenances(savedMaint ? JSON.parse(savedMaint) : INITIAL_MAINTENANCES);
-    setParts(savedParts ? JSON.parse(savedParts) : INITIAL_PARTS);
+    setVehicles(savedVeh ? JSON.parse(savedVeh) : []);
+    setMaintenances(savedMaint ? JSON.parse(savedMaint) : []);
+    setParts(savedParts ? JSON.parse(savedParts) : []);
 
-    const vehiclesCol = collection(db, 'users', uid, 'vehicles');
-    const maintCol = collection(db, 'users', uid, 'maintenances');
-    const partsCol = collection(db, 'users', uid, 'parts');
+    // Colecciones raíz filtradas por el userId del usuario autenticado
+    const vehiclesQuery = query(collection(db, 'vehicles'), where('userId', '==', uid));
+    const maintQuery = query(collection(db, 'maintenances'), where('userId', '==', uid));
+    const partsQuery = query(collection(db, 'parts'), where('userId', '==', uid));
 
-    const unsub1 = onSnapshot(vehiclesCol, (snap) => {
-      if (!snap.empty) {
-        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setVehicles(list);
-        localStorage.setItem(localVehKey, JSON.stringify(list));
-      }
+    const unsub1 = onSnapshot(vehiclesQuery, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setVehicles(list);
+      localStorage.setItem(localVehKey, JSON.stringify(list));
     }, (err) => console.warn('Firestore vehicles listener fallback:', err));
 
-    const unsub2 = onSnapshot(maintCol, (snap) => {
-      if (!snap.empty) {
-        const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        items.sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
-        setMaintenances(items);
-        localStorage.setItem(localMaintKey, JSON.stringify(items));
-      }
+    const unsub2 = onSnapshot(maintQuery, (snap) => {
+      const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      items.sort((a, b) => (b.createdAtMs || b.createdAt?.seconds || 0) - (a.createdAtMs || a.createdAt?.seconds || 0));
+      setMaintenances(items);
+      localStorage.setItem(localMaintKey, JSON.stringify(items));
     }, (err) => console.warn('Firestore maintenances listener fallback:', err));
 
-    const unsub3 = onSnapshot(partsCol, (snap) => {
-      if (!snap.empty) {
-        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setParts(list);
-        localStorage.setItem(localPartsKey, JSON.stringify(list));
-      }
+    const unsub3 = onSnapshot(partsQuery, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setParts(list);
+      localStorage.setItem(localPartsKey, JSON.stringify(list));
     }, (err) => console.warn('Firestore parts listener fallback:', err));
 
     // Listener de colección de usuarios reales de Firestore para el Backoffice
@@ -588,20 +794,20 @@ export function App() {
     return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
   }, [firebaseUser]);
 
-  // Helpers para guardar/actualizar/borrar con fallback automático
+  // Helpers para guardar/actualizar/borrar — colecciones raíz con userId
   const firestoreAdd = async (colName, data) => {
-    const newItem = { ...data, id: String(Date.now()), createdAtMs: Date.now() };
+    const uid = firebaseUser?.uid;
+    const newItem = { ...data, id: String(Date.now()), createdAtMs: Date.now(), userId: uid };
     
     // Actualizar estado local inmediatamente
     if (colName === 'vehicles') setVehicles(prev => [newItem, ...prev]);
     if (colName === 'maintenances') setMaintenances(prev => [newItem, ...prev]);
     if (colName === 'parts') setParts(prev => [newItem, ...prev]);
 
-    if (firebaseUser) {
-      const uid = firebaseUser.uid;
+    if (uid) {
       const key = `garageops_${colName}_${uid}`;
       try {
-        const ref = collection(db, 'users', uid, colName);
+        const ref = collection(db, colName);
         const docRef = await addDoc(ref, newItem);
         return docRef.id;
       } catch (err) {
@@ -624,7 +830,7 @@ export function App() {
       const uid = firebaseUser.uid;
       const key = `garageops_${colName}_${uid}`;
       try {
-        const ref = doc(db, 'users', uid, colName, String(docId));
+        const ref = doc(db, colName, String(docId));
         await updateDoc(ref, data);
       } catch (err) {
         console.warn(`Firestore update ${colName} error:`, err);
@@ -645,7 +851,7 @@ export function App() {
       const uid = firebaseUser.uid;
       const key = `garageops_${colName}_${uid}`;
       try {
-        const ref = doc(db, 'users', uid, colName, String(docId));
+        const ref = doc(db, colName, String(docId));
         await deleteDoc(ref);
       } catch (err) {
         console.warn(`Firestore delete ${colName} error:`, err);
@@ -1301,7 +1507,7 @@ export function App() {
                 {isRegisterMode ? (language === 'es' ? 'Crear Nueva Cuenta' : 'Create Account') : (language === 'es' ? 'Iniciar Sesión' : 'Sign In')}
               </h2>
               <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-xl border border-zinc-800 text-[10px]">
-                {['es', 'en', 'it'].map(lang => (
+                {['es', 'en', 'it', 'fr', 'de', 'pt'].map(lang => (
                   <button
                     key={lang}
                     onClick={() => setLanguage(lang)}
@@ -2495,7 +2701,10 @@ export function App() {
                 {[
                   { code: 'es', label: 'Español', flag: '🇪🇸' },
                   { code: 'en', label: 'English', flag: '🇬🇧' },
-                  { code: 'it', label: 'Italiano', flag: '🇮🇹' }
+                  { code: 'it', label: 'Italiano', flag: '🇮🇹' },
+                  { code: 'fr', label: 'Français', flag: '🇫🇷' },
+                  { code: 'de', label: 'Deutsch', flag: '🇩🇪' },
+                  { code: 'pt', label: 'Português', flag: '🇵🇹' }
                 ].map((item) => (
                   <button
                     key={item.code}
