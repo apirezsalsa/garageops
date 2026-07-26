@@ -10,8 +10,10 @@ import {
   collection, 
   doc, 
   setDoc, 
-  getDocs,
-  updateDoc,
+  getDoc,
+  getDocs, 
+  addDoc, 
+  updateDoc, 
   deleteDoc, 
   onSnapshot,
   query,
@@ -617,9 +619,13 @@ export function App() {
         }
 
         // Leer perfil real de Firestore (incluye role y plan actualizados)
-        const profileSnap = await import('firebase/firestore').then(({ getDoc }) => getDoc(userDocRef)).catch(() => null);
-        if (profileSnap && profileSnap.exists()) {
-          setUserProfile(profileSnap.data());
+        try {
+          const profileSnap = await getDoc(userDocRef);
+          if (profileSnap && profileSnap.exists()) {
+            setUserProfile(profileSnap.data());
+          }
+        } catch (e) {
+          console.warn('Error al leer perfil de Firestore:', e);
         }
       } else {
         setUserProfile(null);
@@ -743,21 +749,52 @@ export function App() {
     const maintQuery = query(collection(db, 'maintenances'), where('userId', '==', uid));
     const partsQuery = query(collection(db, 'parts'), where('userId', '==', uid));
 
+    // Helper para convertir cualquier objeto Timestamp de Firestore a string legible
+    const sanitizeValue = (val) => {
+      if (!val) return val;
+      if (typeof val === 'object') {
+        if (typeof val.seconds === 'number') {
+          return new Date(val.seconds * 1000).toISOString().split('T')[0];
+        }
+        if (val instanceof Date) {
+          return val.toISOString().split('T')[0];
+        }
+        if (Array.isArray(val)) {
+          return val.map(sanitizeValue);
+        }
+        const sanitizedObj = {};
+        for (const [k, v] of Object.entries(val)) {
+          sanitizedObj[k] = sanitizeValue(v);
+        }
+        return sanitizedObj;
+      }
+      return val;
+    };
+
+    const sanitizeDoc = (d) => {
+      const data = d.data();
+      const res = { id: d.id };
+      for (const [k, v] of Object.entries(data)) {
+        res[k] = sanitizeValue(v);
+      }
+      return res;
+    };
+
     const unsub1 = onSnapshot(vehiclesQuery, (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const list = snap.docs.map(sanitizeDoc);
       setVehicles(list);
       localStorage.setItem(localVehKey, JSON.stringify(list));
     }, (err) => console.warn('Firestore vehicles listener fallback:', err));
 
     const unsub2 = onSnapshot(maintQuery, (snap) => {
-      const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      items.sort((a, b) => (b.createdAtMs || b.createdAt?.seconds || 0) - (a.createdAtMs || a.createdAt?.seconds || 0));
+      const items = snap.docs.map(sanitizeDoc);
+      items.sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
       setMaintenances(items);
       localStorage.setItem(localMaintKey, JSON.stringify(items));
     }, (err) => console.warn('Firestore maintenances listener fallback:', err));
 
     const unsub3 = onSnapshot(partsQuery, (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const list = snap.docs.map(sanitizeDoc);
       setParts(list);
       localStorage.setItem(localPartsKey, JSON.stringify(list));
     }, (err) => console.warn('Firestore parts listener fallback:', err));
