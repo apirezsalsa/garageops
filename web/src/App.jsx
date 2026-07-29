@@ -1,10 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { auth, db } from './firebase';
 import { 
   onAuthStateChanged, 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
-  signOut 
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  GoogleAuthProvider,
+  OAuthProvider,
+  signOut
 } from 'firebase/auth';
 import { 
   collection, 
@@ -50,88 +53,61 @@ import {
   BarChart3,
   Lock
 } from 'lucide-react';
+import { TRANSLATIONS, translateCategory } from './locales';
 
-// --- MOCK DATA MEJORADO ---
-const INITIAL_VEHICLES = [
-  { 
-    id: 1, 
-    name: 'KTM 450 EXC-F', 
-    category: 'Enduro • Por Horas', 
-    icon: '🏍️', 
-    usage: '48.5 hrs', 
-    usageNum: 48.5,
-    unit: 'hrs',
-    nextService: '50 hrs',
-    status: 'warning', 
-    statusText: 'Mantenimiento preventivo en 1.5 hrs',
-    accentColor: 'from-amber-500/20 to-orange-500/5',
-    borderColor: 'border-amber-500/30'
-  },
-  { 
-    id: 2, 
-    name: 'BMW R 1250 GS', 
-    category: 'Maxitrail • Por Km', 
-    icon: '🌍', 
-    usage: '24,350 km', 
-    usageNum: 24350,
-    unit: 'km',
-    nextService: '30,000 km',
-    status: 'ok', 
-    statusText: 'Al día',
-    accentColor: 'from-emerald-500/10 to-teal-500/5',
-    borderColor: 'border-emerald-500/30'
-  },
-  { 
-    id: 3, 
-    name: 'Toyota Hilux 4x4', 
-    category: 'Soporte • Por Km', 
-    icon: '🛻', 
-    usage: '112,000 km', 
-    usageNum: 112000,
-    unit: 'km',
-    nextService: '110,000 km',
-    status: 'danger', 
-    statusText: 'Revisión Vencida (+2,000 km)',
-    accentColor: 'from-rose-500/20 to-red-500/5',
-    borderColor: 'border-rose-500/30'
-  },
-];
+// Paleta fija de colores de badge para planes (Tailwind purga clases que no puede detectar
+// estáticamente, así que no se puede construir el nombre de la clase a partir de datos dinámicos).
+export const PLAN_COLOR_STYLES = {
+  zinc: { badge: 'bg-zinc-500/20 text-zinc-300 border-zinc-500/30', ring: 'border-zinc-700' },
+  orange: { badge: 'bg-orange-500/20 text-orange-300 border-orange-500/30', ring: 'border-orange-500/60' },
+  amber: { badge: 'bg-amber-500/20 text-amber-300 border-amber-500/30', ring: 'border-amber-500/60' },
+  emerald: { badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30', ring: 'border-emerald-500/60' },
+  sky: { badge: 'bg-sky-500/20 text-sky-300 border-sky-500/30', ring: 'border-sky-500/60' },
+  violet: { badge: 'bg-violet-500/20 text-violet-300 border-violet-500/30', ring: 'border-violet-500/60' },
+};
+const DEFAULT_PLAN_COLOR = 'zinc';
 
-const INITIAL_MAINTENANCES = [
-  { id: 101, vehicle: 'KTM 450 EXC-F', title: 'Filtro de Aire & Aceite Motorex 10W50', date: '10 Jul 2026', cost: '45.00 €', type: 'Preventivo', badgeColor: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
-  { id: 102, vehicle: 'BMW R 1250 GS', title: 'Neumático Trasero Metzeler Tourance Next 2', date: '28 Jun 2026', cost: '185.00 €', type: 'Repuesto', badgeColor: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
-  { id: 103, vehicle: 'Toyota Hilux 4x4', title: 'Pastillas de Freno Brembo + Líquido DOT4', date: '15 May 2026', cost: '92.50 €', type: 'Correctivo', badgeColor: 'bg-rose-500/10 text-rose-400 border-rose-500/20' },
-];
-
-const INITIAL_PARTS = [
-  { 
-    id: 201, 
-    name: 'Filtro Aceite Motorex 10W50', 
-    compatibleVehicles: ['KTM 450 EXC-F', 'Ktm exc 300cc 2027'], 
-    minStock: 2,
-    purchases: [
-      { id: 1, qty: 2, pricePerUnit: 14.50, date: '2026-06-10', supplier: 'Motosport Pro' },
-      { id: 2, qty: 1, pricePerUnit: 12.90, date: '2026-07-01', supplier: 'Amazon EU' }
-    ]
+// Planes de siembra inicial (se escriben una sola vez en Firestore si la colección 'plans' está vacía)
+const SEED_PLANS = [
+  {
+    id: 'starter',
+    name: 'DIY Starter',
+    priceMonthly: 0,
+    priceAnnual: 0,
+    maxVehicles: 2,
+    badgeColor: 'zinc',
+    highlight: false,
+    features: ['Historial de mantenimiento básico', 'Soporte por comunidad'],
+    isDefaultSignup: false,
+    active: true,
+    order: 0
   },
-  { 
-    id: 202, 
-    name: 'Bujía NGK LMAR9AI-10 Dual Spk', 
-    compatibleVehicles: ['BMW R 1250 GS'], 
-    minStock: 2,
-    purchases: [
-      { id: 1, qty: 1, pricePerUnit: 18.00, date: '2026-05-15', supplier: 'Motorrad Shop' }
-    ]
+  {
+    id: 'pro',
+    name: 'DIY Garage',
+    priceMonthly: 4.99,
+    priceAnnual: 3.99,
+    maxVehicles: 4,
+    badgeColor: 'orange',
+    highlight: true,
+    features: ['Alertas de mantenimiento', 'Gestión de repuestos', 'Soporte prioritario'],
+    isDefaultSignup: true,
+    active: true,
+    order: 1
   },
-  { 
-    id: 203, 
-    name: 'Aceite 15W40 Sintético Flotas (5L)', 
-    compatibleVehicles: ['Toyota Hilux 4x4', 'BMW R 1250 GS'], 
-    minStock: 1,
-    purchases: [
-      { id: 1, qty: 2, pricePerUnit: 38.00, date: '2026-04-20', supplier: 'Recambios Calidad' }
-    ]
-  },
+  {
+    id: 'unlimited',
+    name: 'Garage Unlimited',
+    priceMonthly: 9.99,
+    priceAnnual: 7.99,
+    maxVehicles: -1,
+    badgeColor: 'amber',
+    highlight: false,
+    features: ['Alertas de mantenimiento', 'Gestión de repuestos', 'Soporte prioritario 24/7'],
+    isDefaultSignup: false,
+    active: true,
+    order: 2
+  }
 ];
 
 // Función para procesar, recortar al centro en cuadrado (1:1) y optimizar fotos del usuario
@@ -165,424 +141,6 @@ const optimizeImageFile = (file) => {
   });
 };
 
-// --- DICCIONARIO DE TRADUCCIONES MULTI-IDIOMA (i18n) ---
-const TRANSLATIONS = {
-  es: {
-    dashboard: 'Dashboard',
-    garage: 'Garaje',
-    parts: 'Repuestos',
-    history: 'Historial Mantenimiento',
-    settings: 'Ajustes & Suscripción',
-    activePlan: 'Plan Activo',
-    vehicles: 'Vehículos',
-    activeAlerts: 'Alertas Activas',
-    partsStock: 'Stock Repuestos',
-    totalSpent: 'Gasto Acumulado',
-    profileTitle: 'Perfil & Ajustes',
-    profileSub: 'Configuración de idioma, cuenta y plan de suscripción.',
-    appLang: 'Idioma de la Aplicación',
-    selectLang: 'Selecciona tu idioma preferido',
-    activeSub: 'Suscripción Activa',
-    billingCycle: 'Frecuencia de Facturación',
-    monthly: 'Mensual',
-    annual: 'Anual',
-    planStarterDesc: 'Para tu vehículo principal',
-    planProDesc: 'Particulares con 2 a 4 vehículos',
-    planUnlimitedDesc: 'Sin límites para gran garaje o taller',
-    stripePortal: 'Portal de Facturación Stripe',
-    downloadPdf: 'Descargar Facturas PDF',
-    updateUsage: 'Actualizar Uso',
-    addIntervention: '+ Registrar Intervención',
-    addAlert: '+ Programar Alerta',
-    deleteVehicle: 'Eliminar Vehículo',
-    noAlerts: 'Sin alertas programadas.',
-    backToGarage: '← Volver al Garaje',
-    scheduledAlerts: 'ALERTAS PROGRAMADAS',
-    vehicleHistoryTitle: 'HISTORIAL DEL VEHÍCULO',
-    partsLabel: 'Piezas:',
-    usage: 'Uso:',
-    spent: 'Gasto:',
-    changePhoto: 'Cambiar',
-    photo: 'Foto',
-    newAlert: '+ Nueva Alerta',
-    target: 'Objetivo:',
-    overdueBy: 'Superado por',
-    remaining: 'Faltan',
-    addAlertShort: '+ Alerta',
-    updateUnit: 'Actualizar',
-    allVehiclesTitle: 'GARAJE COMPLETO',
-    addVehicleBtn: '+ Añadir Vehículo',
-    noVehiclesMsg: 'No tienes vehículos registrados en tu garaje.',
-    partsTitle: 'INVENTARIO DE REPUESTOS',
-    addPartBtn: '+ Registrar Repuesto',
-    historyTitle: 'HISTORIAL GLOBAL DE INTERVENCIONES',
-    byKm: 'Por Km',
-    byHours: 'Por Horas',
-    maintByKm: 'Mantenimiento por Km',
-    maintByHours: 'Mantenimiento por Horas',
-    exportPdfBtn: 'Exportar Certificado PDF',
-    backupSection: 'Copias de Seguridad & Datos',
-    backupDesc: 'Guarda o restaura tus datos en JSON / CSV',
-    exportJson: 'Exportar Backup JSON',
-    exportCsv: 'Exportar Mantenimientos (CSV)',
-    importJson: 'Restaurar Backup JSON',
-    analyticsTitle: 'Desglose Financiero del Garaje',
-    laborCost: 'Mano de Obra',
-    partsCostLabel: 'Recambios & Piezas',
-    notificationsTitle: 'Notificaciones Activas de Garaje'
-  },
-  en: {
-    dashboard: 'Dashboard',
-    garage: 'Garage',
-    parts: 'Parts & Stock',
-    history: 'Maintenance History',
-    settings: 'Settings & Plan',
-    activePlan: 'Active Plan',
-    vehicles: 'Vehicles',
-    activeAlerts: 'Active Alerts',
-    partsStock: 'Parts Inventory',
-    totalSpent: 'Total Spent',
-    profileTitle: 'Profile & Settings',
-    profileSub: 'Language, account, and subscription plan settings.',
-    appLang: 'App Language',
-    selectLang: 'Select your preferred language',
-    activeSub: 'Active Subscription',
-    billingCycle: 'Billing Cycle',
-    monthly: 'Monthly',
-    annual: 'Annual',
-    planStarterDesc: 'For your daily ride',
-    planProDesc: 'DIYers with 2 to 4 vehicles',
-    planUnlimitedDesc: 'No limits for large garage',
-    stripePortal: 'Stripe Billing Portal',
-    downloadPdf: 'Download Invoices PDF',
-    updateUsage: 'Update Usage',
-    addIntervention: '+ Add Service Record',
-    addAlert: '+ Schedule Alert',
-    deleteVehicle: 'Delete Vehicle',
-    noAlerts: 'No scheduled alerts.',
-    backToGarage: '← Back to Garage',
-    scheduledAlerts: 'SCHEDULED ALERTS',
-    vehicleHistoryTitle: 'VEHICLE SERVICE HISTORY',
-    partsLabel: 'Parts:',
-    usage: 'Usage:',
-    spent: 'Cost:',
-    changePhoto: 'Change',
-    photo: 'Photo',
-    newAlert: '+ New Alert',
-    target: 'Target:',
-    overdueBy: 'Overdue by',
-    remaining: 'Remaining',
-    addAlertShort: '+ Alert',
-    updateUnit: 'Update',
-    allVehiclesTitle: 'FULL GARAGE',
-    addVehicleBtn: '+ Add Vehicle',
-    noVehiclesMsg: 'No vehicles registered in your garage yet.',
-    addFirstVehicle: 'Add my first vehicle',
-    partsTitle: 'PARTS INVENTORY',
-    addPartBtn: '+ Add Part',
-    historyTitle: 'GLOBAL SERVICE HISTORY',
-    byKm: 'By Distance (Km)',
-    byHours: 'By Hours',
-    maintByKm: 'Service by Km',
-    maintByHours: 'Service by Hours',
-    exportPdfBtn: 'Export PDF Certificate',
-    backupSection: 'Data Backup & Restore',
-    backupDesc: 'Export or import your garage data via JSON / CSV',
-    exportJson: 'Export JSON Backup',
-    exportCsv: 'Export Services (CSV)',
-    importJson: 'Restore JSON Backup',
-    analyticsTitle: 'Garage Financial Breakdown',
-    laborCost: 'Labor Cost',
-    partsCostLabel: 'Parts & Supplies',
-    notificationsTitle: 'Active Garage Notifications'
-  },
-  it: {
-    dashboard: 'Dashboard',
-    garage: 'Garage',
-    parts: 'Ricambi',
-    history: 'Cronologia Manutenzione',
-    settings: 'Impostazioni & Piano',
-    activePlan: 'Piano Attivo',
-    vehicles: 'Veicoli',
-    activeAlerts: 'Avvisi Attivi',
-    partsStock: 'Scorta Ricambi',
-    totalSpent: 'Spesa Totale',
-    profileTitle: 'Profilo & Impostazioni',
-    profileSub: 'Lingua, conto e impostazioni del piano di abbonamento.',
-    appLang: 'Lingua dell\'applicazione',
-    selectLang: 'Seleziona la tua lingua preferita',
-    activeSub: 'Abbonamento Attivo',
-    billingCycle: 'Ciclo di fatturazione',
-    monthly: 'Mensile',
-    annual: 'Annuale',
-    planStarterDesc: 'Per il tuo veicolo principale',
-    planProDesc: 'Appassionati con 2-4 veicoli',
-    planUnlimitedDesc: 'Senza limiti per grandi garage',
-    stripePortal: 'Portale di fatturazione Stripe',
-    downloadPdf: 'Scarica fatture PDF',
-    updateUsage: 'Aggiorna Lettura',
-    addIntervention: '+ Aggiungi Intervento',
-    addAlert: '+ Pianifica Avviso',
-    deleteVehicle: 'Elimina Veicolo',
-    noAlerts: 'Nessun avviso pianificato.',
-    backToGarage: '← Torna al Garage',
-    scheduledAlerts: 'AVVISI PIANIFICATI',
-    vehicleHistoryTitle: 'CRONOLOGIA DEL VEICOLO',
-    partsLabel: 'Ricambi:',
-    usage: 'Uso:',
-    spent: 'Spesa:',
-    changePhoto: 'Cambia',
-    photo: 'Foto',
-    newAlert: '+ Nuovo Avviso',
-    target: 'Obiettivo:',
-    overdueBy: 'Superato di',
-    remaining: 'Mancano',
-    addAlertShort: '+ Avviso',
-    updateUnit: 'Aggiorna',
-    allVehiclesTitle: 'GARAGE COMPLETO',
-    addVehicleBtn: '+ Aggiungi Veicolo',
-    noVehiclesMsg: 'Nessun veicolo registrato nel tuo garage.',
-    addFirstVehicle: 'Aggiungi il mio primo veicolo',
-    partsTitle: 'INVENTARIO RICAMBI',
-    addPartBtn: '+ Aggiungi Ricambio',
-    historyTitle: 'CRONOLOGIA INTERVENTI GLOBALE',
-    byKm: 'Per Km',
-    byHours: 'Per Ore',
-    maintByKm: 'Manutenzione per Km',
-    maintByHours: 'Manutenzione per Ore',
-    exportPdfBtn: 'Esporta Certificato PDF',
-    backupSection: 'Backup e Ripristino Dati',
-    backupDesc: 'Esporta o importa i dati del garage tramite JSON / CSV',
-    exportJson: 'Esporta Backup JSON',
-    exportCsv: 'Esporta Manutenzioni (CSV)',
-    importJson: 'Ripristina Backup JSON',
-    analyticsTitle: 'Analisi Finanziaria del Garage',
-    laborCost: 'Manodopera',
-    partsCostLabel: 'Ricambi & Componenti',
-    notificationsTitle: 'Notifiche Attive del Garage'
-  }
-};
-
-// Traducciones adicionales: Français, Deutsch, Português
-TRANSLATIONS.fr = {
-  dashboard: 'Tableau de bord',
-  garage: 'Garage',
-  parts: 'Pièces',
-  history: 'Historique Entretien',
-  settings: 'Paramètres & Plan',
-  activePlan: 'Plan Actif',
-  vehicles: 'Véhicules',
-  activeAlerts: 'Alertes Actives',
-  partsStock: 'Stock Pièces',
-  totalSpent: 'Dépenses Totales',
-  profileTitle: 'Profil & Paramètres',
-  profileSub: 'Langue, compte et paramètres du plan d\'abonnement.',
-  appLang: 'Langue de l\'Application',
-  selectLang: 'Sélectionnez votre langue préférée',
-  activeSub: 'Abonnement Actif',
-  billingCycle: 'Fréquence de Facturation',
-  monthly: 'Mensuel',
-  annual: 'Annuel',
-  planStarterDesc: 'Pour votre véhicule principal',
-  planProDesc: 'Particuliers avec 2 à 4 véhicules',
-  planUnlimitedDesc: 'Sans limites pour grand garage',
-  stripePortal: 'Portail de Facturation Stripe',
-  downloadPdf: 'Télécharger Factures PDF',
-  updateUsage: 'Mettre à jour',
-  addIntervention: '+ Enregistrer Intervention',
-  addAlert: '+ Programmer Alerte',
-  deleteVehicle: 'Supprimer Véhicule',
-  noAlerts: 'Aucune alerte programmée.',
-  backToGarage: '← Retour au Garage',
-  scheduledAlerts: 'ALERTES PROGRAMMÉES',
-  vehicleHistoryTitle: 'HISTORIQUE DU VÉHICULE',
-  partsLabel: 'Pièces:',
-  usage: 'Usage:',
-  spent: 'Dépense:',
-  changePhoto: 'Changer',
-  photo: 'Photo',
-  newAlert: '+ Nouvelle Alerte',
-  target: 'Objectif:',
-  overdueBy: 'Dépassé de',
-  remaining: 'Reste',
-  addAlertShort: '+ Alerte',
-  updateUnit: 'Actualiser',
-  allVehiclesTitle: 'GARAGE COMPLET',
-  addVehicleBtn: '+ Ajouter Véhicule',
-  noVehiclesMsg: 'Aucun véhicule enregistré dans votre garage.',
-  partsTitle: 'INVENTAIRE DES PIÈCES',
-  addPartBtn: '+ Ajouter Pièce',
-  historyTitle: 'HISTORIQUE GLOBAL DES INTERVENTIONS',
-  byKm: 'Par Km',
-  byHours: 'Par Heures',
-  maintByKm: 'Entretien par Km',
-  maintByHours: 'Entretien par Heures',
-  exportPdfBtn: 'Exporter Certificat PDF',
-  backupSection: 'Sauvegardes & Données',
-  backupDesc: 'Exportez ou importez vos données en JSON / CSV',
-  exportJson: 'Exporter Backup JSON',
-  exportCsv: 'Exporter Entretiens (CSV)',
-  importJson: 'Restaurer Backup JSON',
-  analyticsTitle: 'Analyse Financière du Garage',
-  laborCost: 'Main d\'Œuvre',
-  partsCostLabel: 'Pièces & Composants',
-  notificationsTitle: 'Notifications Actives du Garage'
-};
-
-TRANSLATIONS.de = {
-  dashboard: 'Übersicht',
-  garage: 'Garage',
-  parts: 'Ersatzteile',
-  history: 'Wartungsverlauf',
-  settings: 'Einstellungen & Plan',
-  activePlan: 'Aktiver Plan',
-  vehicles: 'Fahrzeuge',
-  activeAlerts: 'Aktive Warnungen',
-  partsStock: 'Teile-Bestand',
-  totalSpent: 'Gesamtausgaben',
-  profileTitle: 'Profil & Einstellungen',
-  profileSub: 'Sprache, Konto und Abonnement-Plan.',
-  appLang: 'App-Sprache',
-  selectLang: 'Bevorzugte Sprache wählen',
-  activeSub: 'Aktives Abonnement',
-  billingCycle: 'Abrechnungszeitraum',
-  monthly: 'Monatlich',
-  annual: 'Jährlich',
-  planStarterDesc: 'Für dein Hauptfahrzeug',
-  planProDesc: 'Für 2-4 Fahrzeuge',
-  planUnlimitedDesc: 'Unbegrenzt für große Garagen',
-  stripePortal: 'Stripe-Abrechnungsportal',
-  downloadPdf: 'Rechnungen als PDF herunterladen',
-  updateUsage: 'Aktualisieren',
-  addIntervention: '+ Wartung Erfassen',
-  addAlert: '+ Warnung Planen',
-  deleteVehicle: 'Fahrzeug Löschen',
-  noAlerts: 'Keine geplanten Warnungen.',
-  backToGarage: '← Zurück zur Garage',
-  scheduledAlerts: 'GEPLANTE WARNUNGEN',
-  vehicleHistoryTitle: 'FAHRZEUGVERLAUF',
-  partsLabel: 'Teile:',
-  usage: 'Nutzung:',
-  spent: 'Kosten:',
-  changePhoto: 'Ändern',
-  photo: 'Foto',
-  newAlert: '+ Neue Warnung',
-  target: 'Ziel:',
-  overdueBy: 'Überfällig um',
-  remaining: 'Verbleibend',
-  addAlertShort: '+ Warnung',
-  updateUnit: 'Aktualisieren',
-  allVehiclesTitle: 'KOMPLETTE GARAGE',
-  addVehicleBtn: '+ Fahrzeug Hinzufügen',
-  noVehiclesMsg: 'Keine Fahrzeuge in deiner Garage registriert.',
-  partsTitle: 'ERSATZTEIL-INVENTAR',
-  addPartBtn: '+ Teil Hinzufügen',
-  historyTitle: 'GLOBALER WARTUNGSVERLAUF',
-  byKm: 'Nach Km',
-  byHours: 'Nach Stunden',
-  maintByKm: 'Wartung nach Km',
-  maintByHours: 'Wartung nach Stunden',
-  exportPdfBtn: 'PDF-Zertifikat Exportieren',
-  backupSection: 'Datensicherung & Daten',
-  backupDesc: 'Exportiere oder importiere deine Daten als JSON / CSV',
-  exportJson: 'JSON-Backup Exportieren',
-  exportCsv: 'Wartungen (CSV) Exportieren',
-  importJson: 'JSON-Backup Wiederherstellen',
-  analyticsTitle: 'Finanzübersicht der Garage',
-  laborCost: 'Arbeitskosten',
-  partsCostLabel: 'Teile & Zubehör',
-  notificationsTitle: 'Aktive Garage-Benachrichtigungen'
-};
-
-TRANSLATIONS.pt = {
-  dashboard: 'Painel',
-  garage: 'Garagem',
-  parts: 'Peças',
-  history: 'Histórico Manutenção',
-  settings: 'Definições & Plano',
-  activePlan: 'Plano Ativo',
-  vehicles: 'Veículos',
-  activeAlerts: 'Alertas Ativos',
-  partsStock: 'Stock Peças',
-  totalSpent: 'Total Gasto',
-  profileTitle: 'Perfil & Definições',
-  profileSub: 'Idioma, conta e definições do plano de subscrição.',
-  appLang: 'Idioma da Aplicação',
-  selectLang: 'Selecione o seu idioma preferido',
-  activeSub: 'Subscrição Ativa',
-  billingCycle: 'Frequência de Faturação',
-  monthly: 'Mensal',
-  annual: 'Anual',
-  planStarterDesc: 'Para o seu veículo principal',
-  planProDesc: 'Particulares com 2 a 4 veículos',
-  planUnlimitedDesc: 'Sem limites para grande garagem',
-  stripePortal: 'Portal de Faturação Stripe',
-  downloadPdf: 'Descarregar Faturas PDF',
-  updateUsage: 'Atualizar',
-  addIntervention: '+ Registar Intervenção',
-  addAlert: '+ Programar Alerta',
-  deleteVehicle: 'Eliminar Veículo',
-  noAlerts: 'Sem alertas programados.',
-  backToGarage: '← Voltar à Garagem',
-  scheduledAlerts: 'ALERTAS PROGRAMADOS',
-  vehicleHistoryTitle: 'HISTÓRICO DO VEÍCULO',
-  partsLabel: 'Peças:',
-  usage: 'Uso:',
-  spent: 'Gasto:',
-  changePhoto: 'Alterar',
-  photo: 'Foto',
-  newAlert: '+ Novo Alerta',
-  target: 'Objetivo:',
-  overdueBy: 'Ultrapassado em',
-  remaining: 'Faltam',
-  addAlertShort: '+ Alerta',
-  updateUnit: 'Atualizar',
-  allVehiclesTitle: 'GARAGEM COMPLETA',
-  addVehicleBtn: '+ Adicionar Veículo',
-  noVehiclesMsg: 'Não tem veículos registados na sua garagem.',
-  partsTitle: 'INVENTÁRIO DE PEÇAS',
-  addPartBtn: '+ Registar Peça',
-  historyTitle: 'HISTÓRICO GLOBAL DE INTERVENÇÕES',
-  byKm: 'Por Km',
-  byHours: 'Por Horas',
-  maintByKm: 'Manutenção por Km',
-  maintByHours: 'Manutenção por Horas',
-  exportPdfBtn: 'Exportar Certificado PDF',
-  backupSection: 'Cópias de Segurança & Dados',
-  backupDesc: 'Exporte ou importe os seus dados em JSON / CSV',
-  exportJson: 'Exportar Backup JSON',
-  exportCsv: 'Exportar Manutenções (CSV)',
-  importJson: 'Restaurar Backup JSON',
-  analyticsTitle: 'Análise Financeira da Garagem',
-  laborCost: 'Mão de Obra',
-  partsCostLabel: 'Peças & Componentes',
-  notificationsTitle: 'Notificações Ativas da Garagem'
-};
-
-// Función auxiliar para traducir descripciones de categoría de vehículos
-const translateCategory = (categoryStr, lang) => {
-  if (!categoryStr) return '';
-  if (lang === 'es') return categoryStr;
-
-  let res = categoryStr;
-
-  if (lang === 'en') {
-    res = res.replace(/Por Horas/gi, 'By Hours');
-    res = res.replace(/Por Km/gi, 'By Distance (Km)');
-    res = res.replace(/Mantenimiento por Km/gi, 'Maintenance by Km');
-    res = res.replace(/Mantenimiento por Horas/gi, 'Maintenance by Hours');
-    res = res.replace(/Soporte/gi, 'Support Vehicle');
-  } else if (lang === 'it') {
-    res = res.replace(/Por Horas/gi, 'Per Ore');
-    res = res.replace(/Por Km/gi, 'Per Km');
-    res = res.replace(/Mantenimiento por Km/gi, 'Manutenzione per Km');
-    res = res.replace(/Mantenimiento por Horas/gi, 'Manutenzione per Ore');
-    res = res.replace(/Soporte/gi, 'Supporto');
-  }
-
-  return res;
-};
-
 export function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [photoPreviewModal, setPhotoPreviewModal] = useState(null);
@@ -596,6 +154,10 @@ export function App() {
   const [loginError, setLoginError] = useState('');
   const [isRegisterMode, setIsRegisterMode] = useState(false);
 
+  // Referencia mutable al plan por defecto vigente (se sincroniza más abajo, una vez cargados los planes),
+  // para poder leer siempre su valor más reciente dentro del callback de auth sin resuscribir el listener.
+  const defaultPlanIdRef = useRef('pro');
+
   // Listener de sesión Firebase
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -608,25 +170,41 @@ export function App() {
         const isApiRez = user.email && user.email.toLowerCase().includes('apirezsalsa');
         const userDocRef = doc(db, 'users', user.uid);
         try {
-          await setDoc(userDocRef, {
-            email: user.email,
-            role: isApiRez ? 'admin' : 'user',
-            plan: isApiRez ? 'unlimited' : 'pro',
-            updatedAt: serverTimestamp()
-          }, { merge: true });
+          const existingSnap = await getDoc(userDocRef);
+          if (!existingSnap.exists()) {
+            // Solo se fija el plan en la creación inicial del documento: si ya existe, no lo
+            // pisamos en cada login (pisaba pases-regalo y downgrades hechos por el admin).
+            await setDoc(userDocRef, {
+              email: user.email,
+              role: isApiRez ? 'admin' : 'user',
+              plan: isApiRez ? 'unlimited' : defaultPlanIdRef.current,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            });
+          } else {
+            await setDoc(userDocRef, {
+              email: user.email,
+              role: isApiRez ? 'admin' : (existingSnap.data().role || 'user'),
+              updatedAt: serverTimestamp()
+            }, { merge: true });
+          }
         } catch (e) {
           console.warn('Error al sincronizar documento de usuario en Firestore:', e);
         }
 
-        // Leer perfil real de Firestore (incluye role y plan actualizados)
-        try {
-          const profileSnap = await getDoc(userDocRef);
+        // Escuchar perfil real en tiempo real desde Firestore
+        const unsubProfile = onSnapshot(userDocRef, (profileSnap) => {
           if (profileSnap && profileSnap.exists()) {
-            setUserProfile(profileSnap.data());
+            const data = profileSnap.data();
+            // Si el usuario tiene el rol 'admin', su plan efectivo siempre es 'unlimited' sin pagar
+            if (data.role === 'admin' && data.plan !== 'unlimited') {
+              updateDoc(userDocRef, { plan: 'unlimited', updatedAt: serverTimestamp() }).catch(err => console.warn('Error updating admin plan:', err));
+              data.plan = 'unlimited';
+            }
+            setUserProfile(data);
           }
-        } catch (e) {
-          console.warn('Error al leer perfil de Firestore:', e);
-        }
+        }, (e) => console.warn('Error al leer perfil de Firestore:', e));
+        return () => unsubProfile();
       } else {
         setUserProfile(null);
       }
@@ -634,43 +212,151 @@ export function App() {
     return () => unsubscribe();
   }, []);
 
-  // Rol SuperAdmin: fuente de verdad = campo role en Firestore.
-  // Fallback al check de email mientras el perfil carga (evita parpadeo en UI para admins reales).
-  const isSuperAdmin = 
-    userProfile?.role === 'admin' ||          // Firestore (fuente de verdad)
-    userProfile?.plan === 'unlimited' ||      // Plan unlimited también es admin
-    userEmail === 'demo@garageops.io' ||      // Cuenta demo especial
-    (userProfile === null && (                // Fallback mientras carga el perfil
-      userEmail.toLowerCase().includes('apirezsalsa')
-    ));
+  // Detectar si el usuario intenta acceder vía backdoor / admin directo (?admin o #admin en la URL)
+  const isAdminDirectURL = 
+    window.location.hash.toLowerCase() === '#admin' || 
+    window.location.search.toLowerCase().includes('admin');
 
-  const [allUsersList, setAllUsersList] = useState([
-    { id: 'apirezsalsa_u', email: 'apirezsalsa@garageops.io', role: 'admin', plan: 'unlimited', giftDays: 365, vehiclesCount: 2, status: 'active', registered: '2026-07-25' },
-    { id: 'u1', email: 'demo@garageops.io', role: 'admin', plan: 'unlimited', giftDays: 0, vehiclesCount: 3, status: 'active', registered: '2026-07-20' },
-    { id: 'u2', email: 'alex.mecanica@garageops.io', role: 'user', plan: 'pro', giftDays: 30, vehiclesCount: 2, status: 'active', registered: '2026-07-22' }
-  ]);
+  // Acceso al Backoffice: únicamente usuarios con role 'admin' o el email principal apirezsalsa@gmail.com
+  const isSuperAdmin = 
+    userProfile?.role === 'admin' ||
+    userEmail?.toLowerCase() === 'apirezsalsa@gmail.com';
+
+  // Si entra por la URL especial de admin y se verifica que es SuperAdmin, redirigir directamente al Backoffice
+  useEffect(() => {
+    if (isAdminDirectURL && isSuperAdmin && firebaseUser) {
+      setActiveTab('admin');
+    }
+  }, [isAdminDirectURL, isSuperAdmin, firebaseUser]);
+
+  // Planes de suscripción configurables desde el Backoffice (Firestore: colección 'plans')
+  const [plans, setPlans] = useState([]);
+  const plansById = useMemo(() => Object.fromEntries(plans.map(p => [p.id, p])), [plans]);
+  const defaultPlanId = useMemo(() => plans.find(p => p.isDefaultSignup && p.active !== false)?.id || 'pro', [plans]);
+  useEffect(() => { defaultPlanIdRef.current = defaultPlanId; }, [defaultPlanId]);
+
+  // Listener global de planes + siembra inicial (una sola vez, hecha por el SuperAdmin si la colección está vacía)
+  useEffect(() => {
+    if (!firebaseUser) return;
+    const plansQuery = query(collection(db, 'plans'), orderBy('order'));
+    const unsubPlans = onSnapshot(plansQuery, async (snap) => {
+      if (snap.empty) {
+        setPlans(SEED_PLANS);
+        if (isSuperAdmin) {
+          try {
+            for (const seed of SEED_PLANS) {
+              const { id, ...data } = seed;
+              await setDoc(doc(db, 'plans', id), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+            }
+          } catch (err) {
+            console.warn('Error al sembrar planes iniciales:', err);
+          }
+        }
+        return;
+      }
+      setPlans(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.warn('Firestore plans listener fallback:', err));
+    return () => unsubPlans();
+  }, [firebaseUser, isSuperAdmin]);
+
+  const [allUsersList, setAllUsersList] = useState([]);
+  const [vehicleCountsByUser, setVehicleCountsByUser] = useState({}); // { uid: count }
   const [adminUserSearch, setAdminUserSearch] = useState('');
-  const [showGiftModal, setShowGiftModal] = useState(null); // usuario seleccionado para regalo
+  const [selectedAdminUser, setSelectedAdminUser] = useState(null); // usuario seleccionado para gestionar en modal
+  const [adminSubTab, setAdminSubTab] = useState('users'); // 'users' | 'plans' — sub-pestaña del Backoffice
+  const [editingPlan, setEditingPlan] = useState(null); // plan siendo creado/editado en el modal de Planes ({} para crear uno nuevo)
   const [giftDaysInput, setGiftDaysInput] = useState('30');
   const [giftPlanInput, setGiftPlanInput] = useState('unlimited');
   const [inspectingUser, setInspectingUser] = useState(null); // usuario siendo inspeccionado en modo soporte
+  // uid que realmente debe usarse para leer/escribir datos: el del usuario inspeccionado si hay uno activo, si no el del admin autenticado
+  const effectiveUserId = inspectingUser ? inspectingUser.id : firebaseUser?.uid;
+
+  // Registra en Firestore quién hizo qué mientras estaba en Modo Inspección (auditoría)
+  const logInspectionAction = async (action, colName, docId, data) => {
+    if (!inspectingUser || !firebaseUser) return;
+    try {
+      await addDoc(collection(db, 'auditLogs'), {
+        action, // 'create' | 'update' | 'delete'
+        collection: colName,
+        docId: String(docId),
+        data: data || null,
+        adminUid: firebaseUser.uid,
+        adminEmail: firebaseUser.email || null,
+        targetUid: inspectingUser.id,
+        targetEmail: inspectingUser.email || null,
+        createdAt: serverTimestamp()
+      });
+    } catch (err) {
+      console.warn('No se pudo registrar el log de auditoría:', err);
+    }
+  };
+  const [noticeModal, setNoticeModal] = useState(null); // Modal de notificaciones personalizadas
 
   // Eliminar usuario definitivamente de Firestore desde el Backoffice
-  const handleDeleteUser = async (targetUser) => {
-    if (!window.confirm(`¿Seguro que deseas ELIMINAR a ${targetUser.email}? Se borrará su cuenta y sus datos de Firestore.`)) return;
+  const handleDeleteUser = (targetUser) => {
+    setConfirmModal({
+      title: '¿Eliminar Usuario?',
+      message: `¿Seguro que deseas eliminar a ${targetUser.email}? Se borrará su cuenta y sus datos del sistema.`,
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'users', targetUser.id));
+          setAllUsersList(prev => prev.filter(u => u.id !== targetUser.id));
+          setNoticeModal({
+            title: 'Usuario Eliminado',
+            message: `El usuario ${targetUser.email} ha sido eliminado con éxito.`,
+            type: 'success'
+          });
+        } catch (err) {
+          console.error('Error al eliminar usuario:', err);
+          setAllUsersList(prev => prev.filter(u => u.id !== targetUser.id));
+          setNoticeModal({
+            title: 'Usuario Eliminado',
+            message: `Usuario ${targetUser.email} eliminado del panel.`,
+            type: 'success'
+          });
+        }
+      }
+    });
+  };
 
+  // Crea o actualiza un plan de suscripción desde el modal de "Gestión de Planes" del Backoffice
+  const handleSavePlanConfig = async () => {
+    const draft = editingPlan;
+    if (!draft || !draft.name || !draft.name.trim()) {
+      setNoticeModal({ title: 'Falta el nombre', message: 'El plan necesita un nombre.', type: 'warning' });
+      return;
+    }
+    const active = draft.active !== false;
+    const data = {
+      name: draft.name.trim(),
+      priceMonthly: Number(draft.priceMonthly) || 0,
+      priceAnnual: Number(draft.priceAnnual) || 0,
+      maxVehicles: draft.unlimited ? -1 : (Number(draft.maxVehicles) || 0),
+      badgeColor: draft.badgeColor || DEFAULT_PLAN_COLOR,
+      highlight: !!draft.highlight,
+      features: (draft.featuresText || '').split('\n').map(f => f.trim()).filter(Boolean),
+      active,
+      // Un plan descontinuado no puede quedar marcado como plan por defecto para nuevos registros
+      isDefaultSignup: active && !!draft.isDefaultSignup,
+      updatedAt: serverTimestamp()
+    };
     try {
-      // 1. Borrar documento de usuario de Firestore
-      await deleteDoc(doc(db, 'users', targetUser.id));
-      
-      // 2. Actualizar lista local de usuarios
-      setAllUsersList(prev => prev.filter(u => u.id !== targetUser.id));
-      alert(`El usuario ${targetUser.email} ha sido eliminado con éxito de Firebase.`);
+      if (draft.id) {
+        await updateDoc(doc(db, 'plans', draft.id), data);
+      } else {
+        await addDoc(collection(db, 'plans'), { ...data, order: plans.length, createdAt: serverTimestamp() });
+      }
+      // Solo puede haber un plan marcado como "por defecto para nuevos registros"
+      if (data.isDefaultSignup) {
+        const others = plans.filter(p => p.isDefaultSignup && p.id !== draft.id);
+        for (const other of others) {
+          await updateDoc(doc(db, 'plans', other.id), { isDefaultSignup: false });
+        }
+      }
+      setEditingPlan(null);
     } catch (err) {
-      console.error('Error al eliminar usuario:', err);
-      // Fallback local
-      setAllUsersList(prev => prev.filter(u => u.id !== targetUser.id));
-      alert(`Usuario ${targetUser.email} eliminado del panel.`);
+      console.error('Error al guardar el plan:', err);
+      setNoticeModal({ title: 'Error', message: 'No se pudo guardar el plan.', type: 'warning' });
     }
   };
 
@@ -687,7 +373,7 @@ export function App() {
         // Crear perfil en Firestore
         await setDoc(doc(db, 'users', cred.user.uid), {
           email: loginForm.email,
-          plan: 'pro',
+          plan: defaultPlanIdRef.current,
           createdAt: serverTimestamp()
         });
       } else {
@@ -703,6 +389,28 @@ export function App() {
         'auth/wrong-password': 'Contraseña incorrecta'
       };
       setLoginError(errorMap[err.code] || err.message);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setLoginError('');
+    try {
+      await signInWithPopup(auth, new GoogleAuthProvider());
+    } catch (err) {
+      if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+        setLoginError(language === 'es' ? 'No se pudo iniciar sesión con Google' : 'Could not sign in with Google');
+      }
+    }
+  };
+
+  const handleAppleLogin = async () => {
+    setLoginError('');
+    try {
+      await signInWithPopup(auth, new OAuthProvider('apple.com'));
+    } catch (err) {
+      if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+        setLoginError(language === 'es' ? 'No se pudo iniciar sesión con Apple' : 'Could not sign in with Apple');
+      }
     }
   };
 
@@ -730,7 +438,7 @@ export function App() {
       return;
     }
 
-    const uid = firebaseUser.uid;
+    const uid = effectiveUserId;
     const localVehKey = `garageops_vehicles_${uid}`;
     const localMaintKey = `garageops_maintenances_${uid}`;
     const localPartsKey = `garageops_parts_${uid}`;
@@ -801,40 +509,71 @@ export function App() {
 
     // Listener de colección de usuarios reales de Firestore para el Backoffice
     const allUsersCol = collection(db, 'users');
+    const allVehiclesCol = collection(db, 'vehicles');
+
+    // Conteo real de vehículos por userId
+    const unsub5 = onSnapshot(allVehiclesCol, (vehSnap) => {
+      const countsByUser = {};
+      vehSnap.docs.forEach(d => {
+        const uid = d.data().userId;
+        if (uid) countsByUser[uid] = (countsByUser[uid] || 0) + 1;
+      });
+      setVehicleCountsByUser(countsByUser);
+    }, (err) => console.warn('Firestore vehicles count listener fallback:', err));
+
     const unsub4 = onSnapshot(allUsersCol, (snap) => {
       if (!snap.empty) {
         const realUsers = snap.docs.map(d => {
           const data = d.data();
+
+          // Extraer fecha de registro
+          let regDate = null;
+          if (data.createdAt) {
+            if (typeof data.createdAt.seconds === 'number') {
+              regDate = new Date(data.createdAt.seconds * 1000);
+            } else if (typeof data.createdAt === 'string') {
+              regDate = new Date(data.createdAt);
+            }
+          } else if (data.updatedAt && typeof data.updatedAt.seconds === 'number') {
+            regDate = new Date(data.updatedAt.seconds * 1000);
+          }
+
+          // Extraer última conexión
+          let lastLogin = null;
+          if (data.updatedAt) {
+            if (typeof data.updatedAt.seconds === 'number') {
+              lastLogin = new Date(data.updatedAt.seconds * 1000);
+            } else if (typeof data.updatedAt === 'string') {
+              lastLogin = new Date(data.updatedAt);
+            }
+          }
+
           return {
             id: d.id,
             email: data.email || `user_${d.id.slice(0, 5)}@garageops.io`,
-            role: data.role || (data.email === 'demo@garageops.io' ? 'admin' : 'user'),
-            plan: data.plan || 'starter',
+            role: data.role || 'user',
+            plan: data.plan || defaultPlanId,
             giftDays: data.giftDays || 0,
-            vehiclesCount: data.vehiclesCount || 1,
+            giftPlanExpiry: data.giftPlanExpiry || null,
             status: data.status || 'active',
-            registered: data.createdAt ? new Date(data.createdAt.seconds * 1000).toISOString().split('T')[0] : '2026-07-25'
+            registered: regDate,
+            lastLogin: lastLogin
           };
         });
-        
-        // Fusionar manteniendo únicos por email
-        setAllUsersList(prev => {
-          const map = new Map();
-          prev.forEach(u => map.set(u.email, u));
-          realUsers.forEach(u => map.set(u.email, { ...map.get(u.email), ...u }));
-          return Array.from(map.values());
-        });
+        setAllUsersList(realUsers);
+      } else {
+        setAllUsersList([]);
       }
     }, (err) => console.warn('Firestore users collection listener fallback:', err));
 
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
-  }, [firebaseUser]);
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
+  }, [firebaseUser, inspectingUser]);
 
   // Helpers para guardar/actualizar/borrar — colecciones raíz con userId
   const firestoreAdd = async (colName, data) => {
-    const uid = firebaseUser?.uid;
+    const uid = effectiveUserId;
     const newItem = { ...data, id: String(Date.now()), createdAtMs: Date.now(), userId: uid };
-    
+
     // Actualizar estado local inmediatamente
     if (colName === 'vehicles') setVehicles(prev => [newItem, ...prev]);
     if (colName === 'maintenances') setMaintenances(prev => [newItem, ...prev]);
@@ -848,6 +587,7 @@ export function App() {
         // que update/delete inmediatos tras crear apuntaran al doc equivocado).
         const ref = doc(db, colName, newItem.id);
         await setDoc(ref, newItem);
+        await logInspectionAction('create', colName, newItem.id, data);
         return newItem.id;
       } catch (err) {
         console.warn(`Firestore add ${colName} error, saving locally:`, err);
@@ -866,11 +606,12 @@ export function App() {
     if (colName === 'parts') setParts(prev => prev.map(p => p.id === docId ? { ...p, ...data } : p));
 
     if (firebaseUser) {
-      const uid = firebaseUser.uid;
+      const uid = effectiveUserId;
       const key = `garageops_${colName}_${uid}`;
       try {
         const ref = doc(db, colName, String(docId));
         await updateDoc(ref, data);
+        await logInspectionAction('update', colName, docId, data);
       } catch (err) {
         console.warn(`Firestore update ${colName} error:`, err);
         const currentLocal = JSON.parse(localStorage.getItem(key) || '[]');
@@ -887,11 +628,12 @@ export function App() {
     if (colName === 'parts') setParts(prev => prev.filter(p => p.id !== docId));
 
     if (firebaseUser) {
-      const uid = firebaseUser.uid;
+      const uid = effectiveUserId;
       const key = `garageops_${colName}_${uid}`;
       try {
         const ref = doc(db, colName, String(docId));
         await deleteDoc(ref);
+        await logInspectionAction('delete', colName, docId, null);
       } catch (err) {
         console.warn(`Firestore delete ${colName} error:`, err);
         const currentLocal = JSON.parse(localStorage.getItem(key) || '[]');
@@ -915,11 +657,22 @@ export function App() {
   }, [language]);
 
   // Estado de Plan SaaS Activo y Frecuencia de Facturación
-  const [currentPlan, setCurrentPlan] = useState(() => {
-    return localStorage.getItem('garageops_plan') || 'pro';
-  });
+  const activeUserPlan = (userProfile?.role === 'admin' || userEmail?.toLowerCase() === 'apirezsalsa@gmail.com') 
+    ? 'unlimited' 
+    : (userProfile?.plan || localStorage.getItem('garageops_plan') || 'pro');
+
+  const [currentPlan, setCurrentPlan] = useState(activeUserPlan);
+
+  useEffect(() => {
+    setCurrentPlan(activeUserPlan);
+  }, [activeUserPlan]);
 
   const [billingCycle, setBillingCycle] = useState('monthly');
+
+  // Definición del plan activo y límite de vehículos derivados de la configuración dinámica (colección 'plans')
+  const currentPlanDef = plansById[currentPlan];
+  const maxVehiclesAllowed = currentPlanDef ? (currentPlanDef.maxVehicles === -1 ? Infinity : currentPlanDef.maxVehicles) : 999;
+  const maxVehiclesLabel = maxVehiclesAllowed === Infinity ? '∞' : String(maxVehiclesAllowed);
 
   React.useEffect(() => {
     localStorage.setItem('garageops_plan', currentPlan);
@@ -927,6 +680,7 @@ export function App() {
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [showAddMaintenanceModal, setShowAddMaintenanceModal] = useState(false);
   const [showAddVehicleModal, setShowAddVehicleModal] = useState(false);
+  const [editingVehicleId, setEditingVehicleId] = useState(null);
   const [showKmModal, setShowKmModal] = useState(null);
   const [newKmValue, setNewKmValue] = useState('');
 
@@ -1006,18 +760,55 @@ export function App() {
     usageNum: ''
   });
 
+  const openEditVehicleModal = (v) => {
+    setEditingVehicleId(v.id);
+    setNewVehicleForm({
+      name: v.name || '',
+      category: v.category || 'Mantenimiento por Km',
+      unit: v.unit || 'km',
+      icon: v.icon || '🏍️',
+      photo: v.photo || '',
+      usageNum: (v.usageNum || 0).toString()
+    });
+    setShowAddVehicleModal(true);
+  };
+
   const handleCreateVehicle = async (e) => {
     e.preventDefault();
     if (!newVehicleForm.name) return;
 
+    if (editingVehicleId) {
+      const updatedData = {
+        name: newVehicleForm.name,
+        category: newVehicleForm.category,
+        icon: newVehicleForm.icon,
+        photo: newVehicleForm.photo || null,
+        usage: `${newVehicleForm.usageNum || 0} ${newVehicleForm.unit}`,
+        usageNum: parseFloat(newVehicleForm.usageNum) || 0,
+        unit: newVehicleForm.unit
+      };
+
+      await firestoreUpdate('vehicles', editingVehicleId, updatedData);
+      
+      if (selectedVehicle?.id === editingVehicleId) {
+        setSelectedVehicle(prev => ({ ...prev, ...updatedData }));
+      }
+
+      setShowAddVehicleModal(false);
+      setEditingVehicleId(null);
+      setNewVehicleForm({ name: '', category: 'Mantenimiento por Km', unit: 'km', icon: '🏍️', photo: '', usageNum: '' });
+      return;
+    }
+
     // Validación de límites según el plan
-    const maxAllowed = currentPlan === 'starter' ? 2 : currentPlan === 'pro' ? 4 : 999;
-    if (vehicles.length >= maxAllowed) {
-      alert(
-        language === 'es'
-          ? `Has alcanzado el límite de ${maxAllowed} vehículos de tu plan (${currentPlan.toUpperCase()}). Actualiza tu suscripción en Perfil & Ajustes para añadir más.`
-          : `You reached the limit of ${maxAllowed} vehicles for your plan (${currentPlan.toUpperCase()}). Please upgrade in Profile & Settings.`
-      );
+    if (vehicles.length >= maxVehiclesAllowed) {
+      setNoticeModal({
+        title: 'Límite de Vehículos Alcanzado',
+        message: language === 'es'
+          ? `Has alcanzado el límite de ${maxVehiclesLabel} vehículos de tu plan (${currentPlanDef?.name || currentPlan.toUpperCase()}). Actualiza tu suscripción en Perfil & Ajustes para añadir más.`
+          : `You reached the limit of ${maxVehiclesLabel} vehicles for your plan (${currentPlanDef?.name || currentPlan.toUpperCase()}). Please upgrade in Profile & Settings.`,
+        type: 'warning'
+      });
       return;
     }
 
@@ -1342,7 +1133,11 @@ export function App() {
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
-      alert('Por favor, permite ventanas emergentes para generar el certificado PDF.');
+      setNoticeModal({
+        title: 'Permiso de Ventanas Emergentes',
+        message: 'Por favor, permite las ventanas emergentes en tu navegador para generar e imprimir el certificado PDF.',
+        type: 'warning'
+      });
       return;
     }
 
@@ -1477,8 +1272,17 @@ export function App() {
           if (parsed.maintenances && Array.isArray(parsed.maintenances)) setMaintenances(parsed.maintenances);
           if (parsed.parts && Array.isArray(parsed.parts)) setParts(parsed.parts);
           alert('¡Copia de seguridad restaurada con éxito!');
+          setNoticeModal({
+            title: 'Copia Restaurada',
+            message: '¡La copia de seguridad ha sido restaurada con éxito en tu garaje!',
+            type: 'success'
+          });
         } catch (err) {
-          alert('Error al importar archivo. Asegúrate de seleccionar un JSON válido generado por GarageOps.');
+          setNoticeModal({
+            title: 'Error de Importación',
+            message: 'Error al importar archivo. Asegúrate de seleccionar un JSON válido generado por GarageOps.',
+            type: 'error'
+          });
         }
       };
     }
@@ -1541,6 +1345,16 @@ export function App() {
 
           {/* Tarjeta Formulario Login / Registro */}
           <div className="bg-zinc-900/90 border border-zinc-800 p-6 sm:p-8 rounded-3xl shadow-2xl space-y-5">
+            {isAdminDirectURL && (
+              <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-semibold flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Shield className="w-4 h-4 text-amber-400" />
+                  Acceso Backoffice Admin
+                </span>
+                <span className="text-[10px] font-mono bg-amber-500/20 px-2 py-0.5 rounded text-amber-300 font-bold uppercase">Admin Only</span>
+              </div>
+            )}
+
             <div className="flex items-center justify-between border-b border-zinc-800/80 pb-4">
               <h2 className="text-lg font-bold text-white">
                 {isRegisterMode ? (language === 'es' ? 'Crear Nueva Cuenta' : 'Create Account') : (language === 'es' ? 'Iniciar Sesión' : 'Sign In')}
@@ -1625,6 +1439,37 @@ export function App() {
               </button>
             </form>
 
+            <div className="flex items-center gap-3 text-[10px] text-zinc-500 font-semibold uppercase">
+              <div className="h-px flex-1 bg-zinc-800" />
+              <span>{language === 'es' ? 'o' : 'or'}</span>
+              <div className="h-px flex-1 bg-zinc-800" />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleGoogleLogin}
+              className="w-full py-3 rounded-2xl bg-white hover:bg-zinc-100 text-zinc-900 font-bold text-sm transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2.5"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 48 48">
+                <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12s5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24s8.955,20,20,20s20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"/>
+                <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"/>
+                <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"/>
+                <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"/>
+              </svg>
+              {language === 'es' ? 'Continuar con Google' : 'Continue with Google'}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleAppleLogin}
+              className="w-full py-3 rounded-2xl bg-black hover:bg-zinc-900 border border-zinc-800 text-white font-bold text-sm transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2.5"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 384 512" fill="currentColor">
+                <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/>
+              </svg>
+              {language === 'es' ? 'Continuar con Apple' : 'Continue with Apple'}
+            </button>
+
             {/* Alternar Registro / Login */}
             <div className="pt-2 border-t border-zinc-800/80 text-center">
               <p className="text-xs text-zinc-400">
@@ -1652,10 +1497,10 @@ export function App() {
   }
 
   return (
-    <div className="flex min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-orange-500 selection:text-white pb-24 md:pb-0 antialiased">
+    <div className={`flex min-h-screen font-sans selection:bg-orange-500 selection:text-white pb-24 md:pb-0 antialiased transition-colors duration-300 ${inspectingUser ? 'bg-amber-950 text-amber-50 ring-4 ring-inset ring-amber-500/60' : 'bg-zinc-950 text-zinc-100'}`}>
       
       {/* SIDEBAR DESKTOP (> 768px) */}
-      <aside className="hidden md:flex flex-col w-64 border-r border-zinc-800/80 bg-zinc-950 p-5 justify-between sticky top-0 h-screen shrink-0">
+      <aside className={`hidden md:flex flex-col w-64 border-r p-5 justify-between sticky top-0 h-screen shrink-0 transition-colors duration-300 ${inspectingUser ? 'bg-amber-950 border-amber-800/60' : 'bg-zinc-950 border-zinc-800/80'}`}>
         <div>
           {/* Header & Logo */}
           <div className="flex items-center gap-3 px-2 py-3 mb-8">
@@ -1696,16 +1541,16 @@ export function App() {
               <Zap className="w-3.5 h-3.5 text-amber-400" />
             </div>
             <p className="text-xs font-bold text-zinc-200">
-              {currentPlan === 'starter' ? 'DIY Starter (Gratis)' : currentPlan === 'pro' ? 'DIY Garage' : 'Garage Unlimited'}
+              {currentPlanDef?.name || currentPlan}
             </p>
             <div className="w-full bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-              <div 
-                className="bg-orange-500 h-full transition-all" 
-                style={{ width: `${Math.min(100, (vehicles.length / (currentPlan === 'starter' ? 1 : currentPlan === 'pro' ? 4 : 100)) * 100)}%` }}
+              <div
+                className="bg-orange-500 h-full transition-all"
+                style={{ width: `${Math.min(100, (vehicles.length / (maxVehiclesAllowed === Infinity ? 100 : maxVehiclesAllowed)) * 100)}%` }}
               ></div>
             </div>
             <p className="text-[10px] text-zinc-500 font-mono">
-              {vehicles.length} / {currentPlan === 'starter' ? '1' : currentPlan === 'pro' ? '4' : '∞'} {t('vehicles').toLowerCase()}
+              {vehicles.length} / {maxVehiclesLabel} {t('vehicles').toLowerCase()}
             </p>
           </div>
 
@@ -2082,6 +1927,14 @@ export function App() {
                 </button>
 
                 <button 
+                  onClick={() => openEditVehicleModal(selectedVehicle)}
+                  title={language === 'es' ? 'Editar Vehículo' : 'Edit Vehicle'}
+                  className="p-2 rounded-xl text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10 transition-colors border border-transparent hover:border-amber-500/20"
+                >
+                  <Edit2 className="w-4 h-4" />
+                </button>
+
+                <button 
                   onClick={() => requestDeleteVehicle(selectedVehicle.id)}
                   title={t('deleteVehicle')}
                   className="p-2 rounded-xl text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors border border-transparent hover:border-rose-500/20"
@@ -2173,7 +2026,7 @@ export function App() {
                         selectedVehicle.status === 'warning' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
                         'bg-rose-500/10 text-rose-400 border-rose-500/30'
                       }`}>
-                        {selectedVehicle.statusText}
+                        {selectedVehicle.status === 'ok' ? t('statusOk') : selectedVehicle.statusText}
                       </span>
                     </div>
                   </div>
@@ -2378,7 +2231,7 @@ export function App() {
                   ))
                 ) : (
                   <div className="p-6 text-center text-xs text-zinc-500">
-                    No hay intervenciones registradas todavía para este vehículo. Pulsa en <span className="text-orange-400 font-semibold">+ Registrar Intervención</span> para añadir la primera.
+                    {t('noHistoryMsgPrefix')}<span className="text-orange-400 font-semibold">{t('noHistoryMsgBtn')}</span>{t('noHistoryMsgSuffix')}
                   </div>
                 )}
               </div>
@@ -2395,7 +2248,11 @@ export function App() {
                 <p className="text-xs text-zinc-400 mt-0.5">{language === 'es' ? 'Control individual de cada vehículo registrado.' : language === 'en' ? 'Individual control for each registered vehicle.' : 'Controllo individuale per ogni veicolo registrato.'}</p>
               </div>
               <button 
-                onClick={() => setShowAddVehicleModal(true)} 
+                onClick={() => {
+                  setEditingVehicleId(null);
+                  setNewVehicleForm({ name: '', category: 'Mantenimiento por Km', unit: 'km', icon: '🏍️', photo: '', usageNum: '' });
+                  setShowAddVehicleModal(true);
+                }} 
                 className="px-4 py-2.5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-orange-500/25 active:scale-95 transition-all"
               >
                 <Plus className="w-4 h-4 stroke-[3]" />
@@ -2770,7 +2627,7 @@ export function App() {
                     {language === 'es' ? 'Suscripción Activa' : language === 'en' ? 'Active Subscription' : 'Abbonamento Attivo'}
                   </span>
                   <h3 className="text-2xl font-extrabold text-white mt-2">
-                    {currentPlan === 'starter' ? 'DIY Starter (Gratis)' : currentPlan === 'pro' ? 'DIY Garage (4 Vehículos)' : 'Garage Unlimited'}
+                    {currentPlanDef?.name || currentPlan}
                   </h3>
                   <p className="text-xs text-zinc-400 mt-1 font-mono">
                     {language === 'es' ? 'Renovación automática el 25/08/2026' : language === 'en' ? 'Auto-renewal on 08/25/2026' : 'Rinnovo automatico il 25/08/2026'}
@@ -2788,13 +2645,13 @@ export function App() {
                     {language === 'es' ? 'Vehículos en Garaje' : language === 'en' ? 'Garage Vehicles' : 'Veicoli nel Garage'}
                   </span>
                   <span className="font-mono font-bold text-orange-400">
-                    {vehicles.length} / {currentPlan === 'starter' ? '2' : currentPlan === 'pro' ? '4' : 'Ilimitados'}
+                    {vehicles.length} / {maxVehiclesAllowed === Infinity ? 'Ilimitados' : maxVehiclesLabel}
                   </span>
                 </div>
                 <div className="w-full bg-zinc-900 h-2 rounded-full overflow-hidden border border-zinc-800">
-                  <div 
-                    className="bg-orange-500 h-full transition-all duration-300" 
-                    style={{ width: `${Math.min(100, (vehicles.length / (currentPlan === 'starter' ? 2 : currentPlan === 'pro' ? 4 : 100)) * 100)}%` }}
+                  <div
+                    className="bg-orange-500 h-full transition-all duration-300"
+                    style={{ width: `${Math.min(100, (vehicles.length / (maxVehiclesAllowed === Infinity ? 100 : maxVehiclesAllowed)) * 100)}%` }}
                   ></div>
                 </div>
               </div>
@@ -2827,160 +2684,86 @@ export function App() {
                 </div>
               </div>
 
-              {/* TABLA COMPARATIVA DE PLANES SAAS ENFOCADOS A DIY & PARTICULARES */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-                {/* PLAN 1: STARTER DIY (GRATIS - HASTA 2 VEHÍCULOS POR 1 MES DE PRUEBA) */}
-                <div className={`p-4 rounded-2xl border flex flex-col justify-between space-y-4 transition-all ${
-                  currentPlan === 'starter' 
-                    ? 'bg-orange-500/10 border-orange-500 shadow-lg' 
-                    : 'bg-zinc-950/60 border-zinc-800'
-                }`}>
-                  <div>
-                    <h4 className="font-extrabold text-sm text-white">DIY Starter (Prueba)</h4>
-                    <p className="text-[10px] text-zinc-400 mt-0.5">
-                      {language === 'es' ? 'Prueba gratuita de 1 mes' : language === 'en' ? '1 Month Free Trial' : 'Prova gratuita di 1 mese'}
-                    </p>
-                    <div className="mt-3">
-                      <span className="text-xl font-extrabold text-white font-mono">0 €</span>
-                      <span className="text-[10px] text-orange-400 font-bold block">
-                        {language === 'es' ? '1 Mes Gratis • Luego pasa a DIY Garage' : '1 Month Free • Then upgrades to DIY Garage'}
-                      </span>
+              {/* TABLA COMPARATIVA DE PLANES SAAS (configurados dinámicamente desde el Backoffice) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
+                {plans.filter(plan => plan.active !== false || plan.id === currentPlan).map(plan => {
+                  const isCurrent = currentPlan === plan.id;
+                  const isDiscontinued = plan.active === false;
+                  const price = billingCycle === 'monthly' ? plan.priceMonthly : plan.priceAnnual;
+                  const planMaxVeh = plan.maxVehicles === -1 ? '∞' : plan.maxVehicles;
+                  return (
+                    <div key={plan.id} className={`p-4 rounded-2xl border flex flex-col justify-between space-y-4 transition-all relative ${
+                      isCurrent
+                        ? 'bg-orange-500/10 border-orange-500 shadow-xl'
+                        : 'bg-zinc-950/60 border-zinc-800'
+                    }`}>
+                      {plan.highlight && !isDiscontinued && (
+                        <span className="absolute -top-2.5 right-4 bg-orange-500 text-white text-[9px] font-mono font-extrabold uppercase px-2 py-0.5 rounded-full shadow">
+                          {language === 'es' ? 'Más Popular' : language === 'en' ? 'Most Popular' : 'Più Popolare'}
+                        </span>
+                      )}
+                      {isDiscontinued && (
+                        <span className="absolute -top-2.5 right-4 bg-zinc-700 text-zinc-300 text-[9px] font-mono font-extrabold uppercase px-2 py-0.5 rounded-full shadow">
+                          {language === 'es' ? 'Descontinuado' : language === 'en' ? 'Discontinued' : 'Interrotto'}
+                        </span>
+                      )}
+                      <div>
+                        <h4 className="font-extrabold text-sm text-white">{plan.name}</h4>
+                        <div className="mt-3">
+                          {price > 0 ? (
+                            <>
+                              <span className="text-xl font-extrabold text-white font-mono">{price.toFixed(2)} €</span>
+                              <span className="text-[10px] text-zinc-500 font-mono"> / {language === 'es' ? 'mes' : language === 'en' ? 'mo' : 'mese'}</span>
+                            </>
+                          ) : (
+                            <span className="text-xl font-extrabold text-white font-mono">
+                              {language === 'es' ? 'Gratis' : language === 'en' ? 'Free' : 'Gratis'}
+                            </span>
+                          )}
+                        </div>
+                        <ul className="mt-3 space-y-1.5 text-[11px] text-zinc-400">
+                          <li className="flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                            <span><strong>{planMaxVeh === '∞' ? (language === 'es' ? 'Vehículos Ilimitados' : 'Unlimited Vehicles') : `${language === 'es' ? 'Hasta' : 'Up to'} ${planMaxVeh} ${t('vehicles')}`}</strong></span>
+                          </li>
+                          {(plan.features || []).map((feat, idx) => (
+                            <li key={idx} className="flex items-center gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                              <span>{feat}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPlan(plan.id)}
+                        className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all ${
+                          isCurrent
+                            ? 'bg-zinc-800 text-zinc-400 cursor-default'
+                            : 'bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-500/25'
+                        }`}
+                      >
+                        {isCurrent ? (language === 'es' ? 'Plan Actual' : language === 'en' ? 'Current Plan' : 'Piano Attuale') : (language === 'es' ? `Seleccionar ${plan.name}` : language === 'en' ? `Select ${plan.name}` : `Seleziona ${plan.name}`)}
+                      </button>
                     </div>
-                    <ul className="mt-3 space-y-1.5 text-[11px] text-zinc-400">
-                      <li className="flex items-center gap-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        <span><strong>Hasta 2 Vehículos</strong> (Motos o Coches)</span>
-                      </li>
-                      <li className="flex items-center gap-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        <span>Historial y control de stock básico</span>
-                      </li>
-                      <li className="flex items-center gap-1.5 text-amber-400 font-semibold">
-                        <span>• Límite: 30 Días de Prueba</span>
-                      </li>
-                    </ul>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPlan('starter')}
-                    className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all ${
-                      currentPlan === 'starter'
-                        ? 'bg-zinc-800 text-zinc-400 cursor-default'
-                        : 'bg-zinc-800 hover:bg-orange-500 hover:text-white text-zinc-200 border border-zinc-700'
-                    }`}
-                  >
-                    {currentPlan === 'starter' ? (language === 'es' ? 'Plan Actual' : language === 'en' ? 'Current Plan' : 'Piano Attuale') : (language === 'es' ? 'Seleccionar Plan' : language === 'en' ? 'Select Plan' : 'Seleziona Piano')}
-                  </button>
-                </div>
-
-                {/* PLAN 2: DIY GARAGE (PARTICULARES CON HASTA 4 VEHÍCULOS) */}
-                <div className={`p-4 rounded-2xl border flex flex-col justify-between space-y-4 transition-all relative ${
-                  currentPlan === 'pro' 
-                    ? 'bg-orange-500/10 border-orange-500 shadow-xl' 
-                    : 'bg-zinc-950/60 border-zinc-800'
-                }`}>
-                  <span className="absolute -top-2.5 right-4 bg-orange-500 text-white text-[9px] font-mono font-extrabold uppercase px-2 py-0.5 rounded-full shadow">
-                    DIY Recomendado
-                  </span>
-                  <div>
-                    <h4 className="font-extrabold text-sm text-white">DIY Garage</h4>
-                    <p className="text-[10px] text-zinc-400 mt-0.5">
-                      {language === 'es' ? 'Particulares con 2 a 4 vehículos' : language === 'en' ? 'DIYers with 2 to 4 vehicles' : 'Appassionati con 2-4 veicoli'}
-                    </p>
-                    <div className="mt-3">
-                      <span className="text-xl font-extrabold text-white font-mono">
-                        {billingCycle === 'monthly' ? '4.99 €' : '3.99 €'}
-                      </span>
-                      <span className="text-[10px] text-zinc-500 font-mono"> / {language === 'es' ? 'mes' : language === 'en' ? 'mo' : 'mese'}</span>
-                    </div>
-                    <ul className="mt-3 space-y-1.5 text-[11px] text-zinc-400">
-                      <li className="flex items-center gap-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-orange-400 shrink-0" />
-                        <span><strong>Hasta 4 Vehículos</strong></span>
-                      </li>
-                      <li className="flex items-center gap-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-orange-400 shrink-0" />
-                        <span>Alertas inteligentes por Horas/Km</span>
-                      </li>
-                      <li className="flex items-center gap-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-orange-400 shrink-0" />
-                        <span>Inventario y Stock de Repuestos</span>
-                      </li>
-                    </ul>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPlan('pro')}
-                    className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all ${
-                      currentPlan === 'pro'
-                        ? 'bg-zinc-800 text-zinc-400 cursor-default'
-                        : 'bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-500/25'
-                    }`}
-                  >
-                    {currentPlan === 'pro' ? (language === 'es' ? 'Plan Actual' : language === 'en' ? 'Current Plan' : 'Piano Attuale') : (language === 'es' ? 'Seleccionar DIY Garage' : language === 'en' ? 'Select DIY Garage' : 'Seleziona DIY Garage')}
-                  </button>
-                </div>
-
-                {/* PLAN 3: UNLIMITED DIY / TALLER (VEHÍCULOS ILIMITADOS) */}
-                <div className={`p-4 rounded-2xl border flex flex-col justify-between space-y-4 transition-all ${
-                  currentPlan === 'unlimited' 
-                    ? 'bg-orange-500/10 border-orange-500 shadow-lg' 
-                    : 'bg-zinc-950/60 border-zinc-800'
-                }`}>
-                  <div>
-                    <h4 className="font-extrabold text-sm text-white">Garage Unlimited</h4>
-                    <p className="text-[10px] text-zinc-400 mt-0.5">
-                      {language === 'es' ? 'Sin límites para gran garaje o taller' : language === 'en' ? 'No limits for large garage' : 'Senza limiti per grandi garage'}
-                    </p>
-                    <div className="mt-3">
-                      <span className="text-xl font-extrabold text-white font-mono">
-                        {billingCycle === 'monthly' ? '9.99 €' : '7.99 €'}
-                      </span>
-                      <span className="text-[10px] text-zinc-500 font-mono"> / {language === 'es' ? 'mes' : language === 'en' ? 'mo' : 'mese'}</span>
-                    </div>
-                    <ul className="mt-3 space-y-1.5 text-[11px] text-zinc-400">
-                      <li className="flex items-center gap-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                        <span><strong>Vehículos Ilimitados</strong></span>
-                      </li>
-                      <li className="flex items-center gap-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                        <span>Exportación en PDF con fotos</span>
-                      </li>
-                      <li className="flex items-center gap-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                        <span>Soporte Prioritario</span>
-                      </li>
-                    </ul>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPlan('unlimited')}
-                    className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all ${
-                      currentPlan === 'unlimited'
-                        ? 'bg-zinc-800 text-zinc-400 cursor-default'
-                        : 'bg-zinc-800 hover:bg-orange-500 hover:text-white text-zinc-200 border border-zinc-700'
-                    }`}
-                  >
-                    {currentPlan === 'unlimited' ? (language === 'es' ? 'Plan Actual' : language === 'en' ? 'Current Plan' : 'Piano Attuale') : (language === 'es' ? 'Seleccionar Unlimited' : language === 'en' ? 'Select Unlimited' : 'Seleziona Unlimited')}
-                  </button>
-                </div>
+                  );
+                })}
               </div>
 
               {/* Botones de Acción de Facturación Stripe */}
               <div className="pt-2 flex flex-col sm:flex-row gap-3">
                 <button 
                   onClick={() => {
-                    alert(
-                      language === 'es'
+                    setNoticeModal({
+                      title: 'Portal de Facturación',
+                      message: language === 'es'
                         ? 'Redirigiendo a la pasarela segura de pago Stripe Customer Portal...'
                         : language === 'en'
                         ? 'Redirecting to secure Stripe Customer Portal...'
-                        : 'Reindirizzamento al portale clienti sicuro Stripe...'
-                    );
+                        : 'Reindirizzamento al portale clienti sicuro Stripe...',
+                      type: 'info'
+                    });
                   }}
                   className="px-5 py-3 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow-lg shadow-orange-500/25 transition-all flex items-center justify-center gap-2"
                 >
@@ -2992,13 +2775,15 @@ export function App() {
                 
                 <button 
                   onClick={() => {
-                    alert(
-                      language === 'es'
-                        ? 'Se han descargado tus últimas facturas en formato PDF.'
+                    setNoticeModal({
+                      title: 'Facturas PDF',
+                      message: language === 'es'
+                        ? 'Se han generado y descargado tus últimas facturas en formato PDF.'
                         : language === 'en'
-                        ? 'Your latest invoices have been downloaded as PDF.'
-                        : 'Le tue ultime fatture sono state scaricate in formato PDF.'
-                    );
+                        ? 'Your latest invoices have been downloaded in PDF format.'
+                        : 'Le tue ultime fatture sono state scaricate in formato PDF.',
+                      type: 'success'
+                    });
                   }}
                   className="px-5 py-3 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-semibold text-xs border border-zinc-700 transition-all flex items-center justify-center gap-2"
                 >
@@ -3051,7 +2836,30 @@ export function App() {
         )}
 
         {/* VISTA 6: BACKOFFICE DE ADMINISTRACIÓN SAAS */}
-        {activeTab === 'admin' && isSuperAdmin && (
+        {activeTab === 'admin' && isSuperAdmin && (() => {
+          const totalVehicles = Object.values(vehicleCountsByUser).reduce((a, b) => a + b, 0);
+          const avgVehicles = allUsersList.length > 0 ? (totalVehicles / allUsersList.length).toFixed(1) : 0;
+          const paidUsers = allUsersList.filter(u => u.role !== 'admin' && (plansById[u.plan]?.priceMonthly > 0)).length;
+          const conversionRate = allUsersList.length > 0 ? Math.round((paidUsers / allUsersList.length) * 100) : 0;
+          const mrr = allUsersList.reduce((sum, u) => {
+            if (u.role === 'admin') return sum;
+            return sum + (plansById[u.plan]?.priceMonthly || 0);
+          }, 0);
+
+          const formatDateShort = (d) => {
+            if (!d) return '—';
+            const date = d instanceof Date ? d : new Date(d);
+            return date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
+          };
+
+          const planBadge = (plan) => {
+            const planDef = plansById[plan];
+            const style = PLAN_COLOR_STYLES[planDef?.badgeColor] || PLAN_COLOR_STYLES[DEFAULT_PLAN_COLOR];
+            const label = planDef?.name || plan;
+            return <span className={`px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold border ${style.badge}`}>{label}</span>;
+          };
+
+          return (
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
@@ -3067,7 +2875,6 @@ export function App() {
                   Control global de usuarios, estado de suscripciones SaaS y métricas de plataforma.
                 </p>
               </div>
-
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => alert('Generando informe global en CSV...')}
@@ -3087,7 +2894,7 @@ export function App() {
                   <Users className="w-4 h-4 text-blue-400" />
                 </div>
                 <p className="text-2xl font-black text-white font-mono">{allUsersList.length}</p>
-                <span className="text-[10px] text-emerald-400 font-semibold font-mono">↑ 100% este mes</span>
+                <span className="text-[10px] text-zinc-500 font-mono">{paidUsers} de pago · {allUsersList.length - paidUsers} free</span>
               </div>
 
               <div className="bg-zinc-900/80 p-4 rounded-3xl border border-zinc-800 space-y-1">
@@ -3095,10 +2902,8 @@ export function App() {
                   <span>Vehículos en Plataforma</span>
                   <Bike className="w-4 h-4 text-amber-400" />
                 </div>
-                <p className="text-2xl font-black text-white font-mono">
-                  {allUsersList.reduce((acc, u) => acc + u.vehiclesCount, 0)}
-                </p>
-                <span className="text-[10px] text-zinc-500 font-mono">Promedio: 3.5 veh/usr</span>
+                <p className="text-2xl font-black text-white font-mono">{totalVehicles}</p>
+                <span className="text-[10px] text-zinc-500 font-mono">Promedio: {avgVehicles} veh/usr</span>
               </div>
 
               <div className="bg-zinc-900/80 p-4 rounded-3xl border border-zinc-800 space-y-1">
@@ -3106,31 +2911,51 @@ export function App() {
                   <span>MRR Estimado</span>
                   <Zap className="w-4 h-4 text-emerald-400" />
                 </div>
-                <p className="text-2xl font-black text-emerald-400 font-mono">28.96 €</p>
+                <p className="text-2xl font-black text-emerald-400 font-mono">{mrr.toFixed(2)} €</p>
                 <span className="text-[10px] text-zinc-400 font-mono">Ingresos Recurrentes</span>
               </div>
 
               <div className="bg-zinc-900/80 p-4 rounded-3xl border border-zinc-800 space-y-1">
                 <div className="flex items-center justify-between text-zinc-400 text-xs">
-                  <span>Conversión a Pro</span>
+                  <span>Conversión a Pago</span>
                   <TrendingUp className="w-4 h-4 text-purple-400" />
                 </div>
-                <p className="text-2xl font-black text-white font-mono">75 %</p>
+                <p className="text-2xl font-black text-white font-mono">{conversionRate} %</p>
                 <span className="text-[10px] text-purple-400 font-mono">Planes De Pago</span>
               </div>
             </div>
 
-            {/* TABLA DE GESTIÓN DE USUARIOS */}
+            {/* TOGGLE SUB-PESTAÑAS: USUARIOS / PLANES */}
+            <div className="flex items-center gap-1 bg-zinc-900/80 p-1 rounded-2xl border border-zinc-800 w-fit">
+              <button
+                onClick={() => setAdminSubTab('users')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  adminSubTab === 'users' ? 'bg-orange-500 text-white shadow' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" /> Usuarios
+              </button>
+              <button
+                onClick={() => setAdminSubTab('plans')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  adminSubTab === 'plans' ? 'bg-orange-500 text-white shadow' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5" /> Planes
+              </button>
+            </div>
+
+            {/* DIRECTORIO DE USUARIOS — Listado limpio, clickable */}
+            {adminSubTab === 'users' && (
             <div className="bg-zinc-900/80 p-6 rounded-3xl border border-zinc-800 space-y-4 shadow-xl">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-zinc-800">
                 <div>
                   <h3 className="font-bold text-base text-white flex items-center gap-2">
                     <Users className="w-4 h-4 text-orange-400" />
-                    <span>Directorio de Usuarios Registrados</span>
+                    <span>Directorio de Usuarios ({allUsersList.length})</span>
                   </h3>
-                  <p className="text-xs text-zinc-400 mt-0.5">Asigna planes, modifica estados de acceso o audita cuentas.</p>
+                  <p className="text-xs text-zinc-400 mt-0.5">Haz clic en un usuario para gestionar su cuenta.</p>
                 </div>
-
                 <div className="relative w-full sm:w-64">
                   <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
@@ -3143,131 +2968,172 @@ export function App() {
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-zinc-800 text-zinc-500 font-mono text-[10px] uppercase">
-                      <th className="pb-3 pl-2">Usuario / Email</th>
-                      <th className="pb-3">Rol</th>
-                      <th className="pb-3">Plan SaaS</th>
-                      <th className="pb-3">Vehículos</th>
-                      <th className="pb-3">Registro</th>
-                      <th className="pb-3">Estado</th>
-                      <th className="pb-3 text-right pr-2">Acciones Admin</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-800/60">
-                    {allUsersList
-                      .filter(u => u.email.toLowerCase().includes(adminUserSearch.toLowerCase()))
-                      .map((u) => (
-                        <tr key={u.id} className="hover:bg-zinc-800/30 transition-colors">
-                          <td className="py-3 pl-2 font-bold text-white font-mono flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 flex items-center justify-center font-bold text-xs">
-                              {u.email.charAt(0).toUpperCase()}
-                            </div>
-                            <span>{u.email}</span>
-                          </td>
-                          <td className="py-3">
-                            <select
-                              value={u.role}
-                              onChange={(e) => {
-                                const newRole = e.target.value;
-                                setAllUsersList(prev => prev.map(item => item.id === u.id ? { ...item, role: newRole } : item));
-                              }}
-                              className={`rounded-lg px-2 py-1 text-xs font-mono font-bold outline-none border transition-all ${
-                                u.role === 'admin' 
-                                  ? 'bg-orange-500/10 text-orange-400 border-orange-500/30' 
-                                  : 'bg-zinc-950 text-zinc-300 border-zinc-800 focus:border-orange-500'
-                              }`}
-                            >
-                              <option value="user">USER (Cliente)</option>
-                              <option value="admin">ADMIN (SuperAdmin)</option>
-                            </select>
-                          </td>
-                          <td className="py-3">
-                            <select
-                              value={u.plan}
-                              onChange={(e) => {
-                                const newPlan = e.target.value;
-                                setAllUsersList(prev => prev.map(item => item.id === u.id ? { ...item, plan: newPlan } : item));
-                              }}
-                              className="bg-zinc-950 border border-zinc-800 text-zinc-200 rounded-lg px-2 py-1 text-xs font-semibold outline-none focus:border-orange-500"
-                            >
-                              <option value="starter">DIY Starter (0€)</option>
-                              <option value="pro">DIY Garage (4.99€)</option>
-                              <option value="unlimited">Garage Unlimited (9.99€)</option>
-                            </select>
-                          </td>
-                          <td className="py-3 font-mono font-bold text-zinc-300">
-                            {u.vehiclesCount} veh.
-                          </td>
-                          <td className="py-3 font-mono text-zinc-500 text-[11px]">
-                            {u.registered}
-                          </td>
-                          <td className="py-3">
+              <div className="space-y-1.5">
+                {allUsersList
+                  .filter(u => u.email.toLowerCase().includes(adminUserSearch.toLowerCase()))
+                  .map((u) => {
+                    const vehCount = vehicleCountsByUser[u.id] || 0;
+                    return (
+                      <div
+                        key={u.id}
+                        onClick={() => setSelectedAdminUser(u)}
+                        className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-zinc-950/50 border border-zinc-800/60 hover:border-orange-500/40 hover:bg-zinc-900/80 transition-all cursor-pointer group"
+                      >
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 ${
+                          u.role === 'admin'
+                            ? 'bg-orange-500/15 border border-orange-500/30 text-orange-400'
+                            : 'bg-zinc-800 border border-zinc-700 text-zinc-400'
+                        }`}>
+                          {u.email.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-white truncate">{u.email}</span>
+                            {u.role === 'admin' && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-orange-500/10 text-orange-400 border border-orange-500/20 shrink-0">ADMIN</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 mt-0.5 text-[11px] text-zinc-500">
+                            <span>{planBadge(u.plan)}</span>
+                            <span className="font-mono">{vehCount} veh.</span>
+                            <span className="hidden sm:inline">Alta: {formatDateShort(u.registered)}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`w-2 h-2 rounded-full ${u.status === 'active' ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                          <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-orange-400 transition-colors" />
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+            )}
+
+            {/* GESTIÓN DE PLANES */}
+            {adminSubTab === 'plans' && (() => {
+              const usersCountByPlan = allUsersList.reduce((acc, u) => {
+                acc[u.plan] = (acc[u.plan] || 0) + 1;
+                return acc;
+              }, {});
+              return (
+              <div className="bg-zinc-900/80 p-6 rounded-3xl border border-zinc-800 space-y-4 shadow-xl">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-zinc-800">
+                  <div>
+                    <h3 className="font-bold text-base text-white flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-orange-400" />
+                      <span>Planes de Suscripción ({plans.length})</span>
+                    </h3>
+                    <p className="text-xs text-zinc-400 mt-0.5">Configura nombres, precios y límites de vehículos.</p>
+                  </div>
+                  <button
+                    onClick={() => setEditingPlan({
+                      name: '', priceMonthly: 0, priceAnnual: 0, maxVehicles: 2, unlimited: false,
+                      badgeColor: 'zinc', highlight: false, featuresText: '', isDefaultSignup: false, active: true
+                    })}
+                    className="px-3.5 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold transition-all flex items-center gap-1.5 shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Crear Plan
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {plans.map(plan => {
+                    const style = PLAN_COLOR_STYLES[plan.badgeColor] || PLAN_COLOR_STYLES[DEFAULT_PLAN_COLOR];
+                    const usersOnPlan = usersCountByPlan[plan.id] || 0;
+                    const isDiscontinued = plan.active === false;
+                    return (
+                      <div key={plan.id} className={`p-4 rounded-2xl border space-y-3 ${style.ring} bg-zinc-950/60 ${isDiscontinued ? 'opacity-60' : ''}`}>
+                        <div className="flex items-center justify-between">
+                          <span className={`px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold border ${style.badge}`}>{plan.name}</span>
+                          <div className="flex items-center gap-1.5">
+                            {isDiscontinued && (
+                              <span className="text-[9px] font-mono font-bold text-zinc-400 bg-zinc-700/30 px-1.5 py-0.5 rounded border border-zinc-700">DESCONTINUADO</span>
+                            )}
+                            {plan.isDefaultSignup && (
+                              <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">POR DEFECTO</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-lg font-black text-white font-mono">
+                          {plan.priceMonthly > 0 ? `${plan.priceMonthly.toFixed(2)} € / mes` : 'Gratis'}
+                        </div>
+                        <div className="text-[11px] text-zinc-400 font-mono">
+                          {plan.priceAnnual > 0 ? `${plan.priceAnnual.toFixed(2)} € / mes (anual)` : '—'}
+                        </div>
+                        <div className="text-xs text-zinc-300">
+                          Límite: <strong>{plan.maxVehicles === -1 ? 'Ilimitado' : `${plan.maxVehicles} vehículos`}</strong>
+                        </div>
+                        <div className="text-[11px] text-zinc-500 font-mono">{usersOnPlan} usuario{usersOnPlan !== 1 ? 's' : ''} en este plan</div>
+                        <div className="flex items-center gap-2 pt-1 flex-wrap">
+                          <button
+                            onClick={() => setEditingPlan({
+                              ...plan,
+                              featuresText: (plan.features || []).join('\n'),
+                              unlimited: plan.maxVehicles === -1
+                            })}
+                            className="flex-1 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" /> Editar
+                          </button>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await updateDoc(doc(db, 'plans', plan.id), {
+                                  active: isDiscontinued,
+                                  isDefaultSignup: isDiscontinued ? plan.isDefaultSignup : false,
+                                  updatedAt: serverTimestamp()
+                                });
+                              } catch (err) {
+                                console.error('Error al cambiar estado del plan:', err);
+                              }
+                            }}
+                            className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                              isDiscontinued
+                                ? 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-400'
+                                : 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-400'
+                            }`}
+                            title={isDiscontinued ? 'Reactivar plan' : 'Descontinuar: ya no se ofrecerá a nuevos usuarios, pero los actuales lo conservan'}
+                          >
+                            {isDiscontinued ? 'Reactivar' : 'Descontinuar'}
+                          </button>
+                          {usersOnPlan === 0 && (
                             <button
                               onClick={() => {
-                                setAllUsersList(prev => prev.map(item => item.id === u.id ? { ...item, status: item.status === 'active' ? 'suspended' : 'active' } : item));
+                                setConfirmModal({
+                                  title: '¿Eliminar Plan?',
+                                  message: `¿Seguro que deseas eliminar el plan "${plan.name}"? Esta acción no se puede deshacer.`,
+                                  onConfirm: async () => {
+                                    try {
+                                      await deleteDoc(doc(db, 'plans', plan.id));
+                                    } catch (err) {
+                                      console.error('Error al eliminar plan:', err);
+                                    }
+                                  }
+                                });
                               }}
-                              className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-bold transition-all ${
-                                u.status === 'active' 
-                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-rose-500/20 hover:text-rose-400' 
-                                  : 'bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-emerald-500/20 hover:text-emerald-400'
-                              }`}
-                            >
-                              {u.status === 'active' ? '● ACTIVO' : '✕ SUSPENDIDO'}
-                            </button>
-                          </td>
-                          <td className="py-3 text-right pr-2 space-x-1 whitespace-nowrap">
-                            <button
-                              onClick={() => {
-                                setShowGiftModal(u);
-                                setGiftPlanInput(u.plan === 'starter' ? 'pro' : 'unlimited');
-                              }}
-                              title="Obsequiar pase temporal VIP / Pro"
-                              className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 font-bold text-[11px] border border-amber-500/30 transition-all active:scale-95"
-                            >
-                              🎁 Regalar Pass
-                            </button>
-                            <button
-                              onClick={() => {
-                                alert(`Se ha enviado un correo oficial a ${u.email} con el enlace seguro para restablecer su contraseña.`);
-                              }}
-                              title="Enviar email para forzar el restablecimiento de contraseña"
-                              className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-[11px] border border-zinc-700 transition-all active:scale-95"
-                            >
-                              🔑 Reset Clave
-                            </button>
-                            <button
-                              onClick={() => {
-                                setInspectingUser(u);
-                                setActiveTab('dashboard');
-                              }}
-                              className="px-2.5 py-1 rounded-lg bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 font-bold text-[11px] border border-orange-500/30 transition-all active:scale-95 inline-flex items-center gap-1"
-                            >
-                              <span>👁️ Inspeccionar</span>
-                            </button>
-                            <button
-                              onClick={() => handleDeleteUser(u)}
-                              title="Eliminar usuario definitivamente de Firebase"
-                              className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-all active:scale-95 inline-flex items-center"
+                              className="py-2 px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-xs font-bold transition-all"
+                              title="Eliminar permanentemente (sin usuarios asignados)"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+              );
+            })()}
           </div>
-        )}
+          );
+        })()}
 
       </main>
 
       {/* NAVEGACIÓN INFERIOR PWA MÓVIL (< 768px) */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-zinc-950/90 backdrop-blur-xl border-t border-zinc-800/80 flex items-center justify-around px-2 z-40">
+      <nav className={`md:hidden fixed bottom-0 left-0 right-0 h-16 backdrop-blur-xl border-t flex items-center justify-around px-2 z-40 transition-colors duration-300 ${inspectingUser ? 'bg-amber-950/90 border-amber-800/60' : 'bg-zinc-950/90 border-zinc-800/80'}`}>
         <MobileNavItem icon={Home} label={t('dashboard')} active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setSelectedVehicle(null); }} />
         <MobileNavItem icon={Bike} label={t('garage')} active={activeTab === 'garage'} onClick={() => { setActiveTab('garage'); setSelectedVehicle(null); }} />
         <MobileNavItem icon={Wrench} label={t('parts')} active={activeTab === 'parts'} onClick={() => { setActiveTab('parts'); setSelectedVehicle(null); }} />
@@ -3275,106 +3141,357 @@ export function App() {
         <MobileNavItem icon={User} label={t('profileTitle').split('&')[0].trim()} active={activeTab === 'profile'} onClick={() => { setActiveTab('profile'); setSelectedVehicle(null); }} />
       </nav>
 
-      {/* MODAL ADMIN: OBSEQUIAR MEMBRESÍA VIP / PRO */}
-      {showGiftModal && (
+      {/* MODAL: GESTIÓN COMPLETA DE USUARIO */}
+      {selectedAdminUser && (() => {
+        const u = selectedAdminUser;
+        const vehCount = vehicleCountsByUser[u.id] || 0;
+
+        const fmtDate = (d) => {
+          if (!d) return '—';
+          const date = d instanceof Date ? d : new Date(d);
+          return date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
+        };
+        const fmtDateTime = (d) => {
+          if (!d) return '—';
+          const date = d instanceof Date ? d : new Date(d);
+          return date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+        };
+
+        const handleSaveRole = async (newRole) => {
+          try {
+            await updateDoc(doc(db, 'users', u.id), { role: newRole, updatedAt: serverTimestamp() });
+            setAllUsersList(prev => prev.map(item => item.id === u.id ? { ...item, role: newRole } : item));
+            setSelectedAdminUser(prev => prev ? { ...prev, role: newRole } : prev);
+            setNoticeModal({ title: 'Rol Actualizado', message: `${u.email} ahora es ${newRole.toUpperCase()}.`, type: 'success' });
+          } catch (err) {
+            console.error('Error al cambiar rol:', err);
+            setNoticeModal({ title: 'Error', message: 'No se pudo cambiar el rol.', type: 'warning' });
+          }
+        };
+
+        const handleSavePlan = async (newPlan) => {
+          try {
+            await updateDoc(doc(db, 'users', u.id), { plan: newPlan, updatedAt: serverTimestamp() });
+            setAllUsersList(prev => prev.map(item => item.id === u.id ? { ...item, plan: newPlan } : item));
+            setSelectedAdminUser(prev => prev ? { ...prev, plan: newPlan } : prev);
+            setNoticeModal({ title: 'Plan Actualizado', message: `${u.email} → ${plansById[newPlan]?.name || newPlan}`, type: 'success' });
+          } catch (err) {
+            console.error('Error al cambiar plan:', err);
+            setNoticeModal({ title: 'Error', message: 'No se pudo cambiar el plan.', type: 'warning' });
+          }
+        };
+
+        const handleGiftPass = async (plan, days) => {
+          const expiry = new Date();
+          expiry.setDate(expiry.getDate() + days);
+          try {
+            await updateDoc(doc(db, 'users', u.id), {
+              plan: plan,
+              giftDays: days,
+              giftPlanExpiry: expiry.toISOString(),
+              updatedAt: serverTimestamp()
+            });
+            setAllUsersList(prev => prev.map(item => item.id === u.id ? { ...item, plan, giftDays: days, giftPlanExpiry: expiry.toISOString() } : item));
+            setSelectedAdminUser(prev => prev ? { ...prev, plan, giftDays: days, giftPlanExpiry: expiry.toISOString() } : prev);
+            setNoticeModal({ title: '🎁 Pase Otorgado', message: `${plansById[plan]?.name || plan} por ${days} días a ${u.email}. Expira: ${fmtDate(expiry)}`, type: 'success' });
+          } catch (err) {
+            console.error('Error al otorgar pase:', err);
+          }
+        };
+
+        const handleRevokePass = async () => {
+          try {
+            await updateDoc(doc(db, 'users', u.id), {
+              plan: defaultPlanId,
+              giftDays: 0,
+              giftPlanExpiry: null,
+              updatedAt: serverTimestamp()
+            });
+            setAllUsersList(prev => prev.map(item => item.id === u.id ? { ...item, plan: defaultPlanId, giftDays: 0, giftPlanExpiry: null } : item));
+            setSelectedAdminUser(prev => prev ? { ...prev, plan: defaultPlanId, giftDays: 0, giftPlanExpiry: null } : prev);
+            setNoticeModal({ title: 'Pase Revocado', message: `${u.email} → ${(plansById[defaultPlanId]?.name || defaultPlanId).toUpperCase()}. Se ha revocado el acceso premium.`, type: 'success' });
+          } catch (err) {
+            console.error('Error al revocar pase:', err);
+          }
+        };
+
+        const handleToggleStatus = async () => {
+          const newStatus = u.status === 'active' ? 'suspended' : 'active';
+          try {
+            await updateDoc(doc(db, 'users', u.id), { status: newStatus, updatedAt: serverTimestamp() });
+            setAllUsersList(prev => prev.map(item => item.id === u.id ? { ...item, status: newStatus } : item));
+            setSelectedAdminUser(prev => prev ? { ...prev, status: newStatus } : prev);
+          } catch (err) {
+            console.error('Error al cambiar estado:', err);
+          }
+        };
+
+        return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-zinc-900 rounded-3xl border border-zinc-800 p-6 space-y-5 animate-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
-              <div className="flex items-center gap-2">
-                <span className="text-xl">🎁</span>
-                <div>
-                  <h3 className="font-bold text-base text-white">Obsequiar Membresía / Pase VIP</h3>
-                  <p className="text-xs text-zinc-400">Asigna acceso premium gratis por tiempo determinado.</p>
+          <div className="w-full max-w-2xl bg-zinc-900 rounded-3xl border border-zinc-800 max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-150">
+            {/* Cabecera */}
+            <div className="sticky top-0 bg-zinc-900 border-b border-zinc-800 p-6 rounded-t-3xl z-10">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-lg ${
+                    u.role === 'admin'
+                      ? 'bg-orange-500/15 border-2 border-orange-500/40 text-orange-400'
+                      : 'bg-zinc-800 border-2 border-zinc-700 text-zinc-300'
+                  }`}>
+                    {u.email.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-lg text-white">{u.email}</h3>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className={`px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold border ${
+                        u.role === 'admin' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' : 'bg-zinc-800 text-zinc-400 border-zinc-700'
+                      }`}>{u.role.toUpperCase()}</span>
+                      <span className={`w-2 h-2 rounded-full ${u.status === 'active' ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                      <span className="text-[10px] text-zinc-500 font-mono">{u.status === 'active' ? 'Activo' : 'Suspendido'}</span>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSelectedAdminUser(null)}
+                  className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center font-bold text-sm"
+                >✕</button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {/* Datos del usuario */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bg-zinc-950 p-3 rounded-2xl border border-zinc-800/80 space-y-0.5">
+                  <span className="text-[10px] font-mono text-zinc-500 uppercase font-bold block">Vehículos</span>
+                  <p className="text-lg font-black text-white font-mono">{vehCount}</p>
+                </div>
+                <div className="bg-zinc-950 p-3 rounded-2xl border border-zinc-800/80 space-y-0.5">
+                  <span className="text-[10px] font-mono text-zinc-500 uppercase font-bold block">Fecha Alta</span>
+                  <p className="text-xs font-bold text-zinc-300 font-mono">{fmtDate(u.registered)}</p>
+                </div>
+                <div className="bg-zinc-950 p-3 rounded-2xl border border-zinc-800/80 space-y-0.5">
+                  <span className="text-[10px] font-mono text-zinc-500 uppercase font-bold block">Última Conexión</span>
+                  <p className="text-xs font-bold text-zinc-300 font-mono">{fmtDateTime(u.lastLogin)}</p>
+                </div>
+                <div className="bg-zinc-950 p-3 rounded-2xl border border-zinc-800/80 space-y-0.5">
+                  <span className="text-[10px] font-mono text-zinc-500 uppercase font-bold block">Días Pase</span>
+                  <p className="text-lg font-black text-amber-400 font-mono">{u.giftDays || '—'}</p>
+                  {u.giftPlanExpiry && <span className="text-[9px] text-zinc-500 font-mono">Exp: {fmtDate(u.giftPlanExpiry)}</span>}
                 </div>
               </div>
-              <button 
-                onClick={() => setShowGiftModal(null)}
-                className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center font-bold text-sm"
-              >
-                ✕
-              </button>
-            </div>
 
-            <div className="bg-zinc-950 p-3.5 rounded-2xl border border-zinc-800/80 space-y-1">
-              <span className="text-[10px] font-mono text-zinc-500 uppercase font-bold block">Usuario Destinatario</span>
-              <p className="text-sm font-bold text-orange-400 font-mono">{showGiftModal.email}</p>
-            </div>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const days = parseInt(giftDaysInput) || 30;
-                setAllUsersList(prev => prev.map(u => u.id === showGiftModal.id ? { ...u, plan: giftPlanInput, giftDays: days } : u));
-                alert(`¡Se ha activado la membresía ${giftPlanInput.toUpperCase()} por ${days} días a ${showGiftModal.email}!`);
-                setShowGiftModal(null);
-              }}
-              className="space-y-4 text-xs"
-            >
-              <div>
-                <label className="block text-zinc-400 font-medium mb-1">Seleccionar Plan a Regalar</label>
-                <select
-                  value={giftPlanInput}
-                  onChange={(e) => setGiftPlanInput(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-medium"
-                >
-                  <option value="pro">DIY Garage (Hasta 4 Vehículos)</option>
-                  <option value="unlimited">Garage Unlimited (Vehículos Ilimitados)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-zinc-400 font-medium mb-1">Duración del Regalo (en Días)</label>
-                <div className="grid grid-cols-4 gap-2 mb-2">
-                  {[
-                    { label: '7 Días', days: '7' },
-                    { label: '1 Mes', days: '30' },
-                    { label: '3 Meses', days: '90' },
-                    { label: '1 Año', days: '365' }
-                  ].map((opt) => (
+              {/* Plan & Suscripción */}
+              <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800/80 space-y-3">
+                <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5 text-amber-400" /> Plan & Suscripción
+                </h4>
+                <div className="flex flex-wrap items-center gap-2">
+                  {plans.map(p => (
                     <button
-                      key={opt.days}
-                      type="button"
-                      onClick={() => setGiftDaysInput(opt.days)}
-                      className={`py-2 rounded-xl border text-xs font-bold transition-all ${
-                        giftDaysInput === opt.days 
-                          ? 'bg-amber-500/20 border-amber-500 text-amber-400 shadow-sm' 
-                          : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-white'
+                      key={p.id}
+                      onClick={() => handleSavePlan(p.id)}
+                      className={`px-3.5 py-2 rounded-xl border text-xs font-bold transition-all ${
+                        u.plan === p.id
+                          ? 'bg-orange-500/20 border-orange-500 text-orange-400 shadow-sm'
+                          : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600'
                       }`}
                     >
-                      {opt.label}
+                      {p.name} ({p.priceMonthly.toFixed(2)}€)
                     </button>
                   ))}
                 </div>
-                <input
-                  type="number"
-                  min="1"
-                  max="3650"
-                  placeholder="Número de días personalizado (ej: 45)"
-                  value={giftDaysInput}
-                  onChange={(e) => setGiftDaysInput(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-medium"
-                />
               </div>
 
-              <div className="pt-2 flex items-center justify-end gap-2 border-t border-zinc-800">
+              {/* Acciones de Pase / Regalar Pase */}
+              <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800/80 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                    🎁 Regalar / Gestionar Pase Temporal
+                  </h4>
+                  {u.giftDays > 0 && (
+                    <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                      Pase Activo: {u.giftDays} días ({plansById[u.plan]?.name || u.plan})
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="block text-zinc-400 font-medium mb-1">Plan a Regalar</label>
+                    <select
+                      value={giftPlanInput}
+                      onChange={(e) => setGiftPlanInput(e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-medium"
+                    >
+                      {plans.filter(p => p.priceMonthly > 0 && p.active !== false).map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.maxVehicles === -1 ? (language === 'es' ? 'Vehículos Ilimitados' : 'Unlimited Vehicles') : `${language === 'es' ? 'Hasta' : 'Up to'} ${p.maxVehicles} ${t('vehicles')}`})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-zinc-400 font-medium mb-1">Duración (Días Personalizados)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="3650"
+                      placeholder="Ej: 30"
+                      value={giftDaysInput}
+                      onChange={(e) => setGiftDaysInput(e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-medium"
+                    />
+                  </div>
+                </div>
+
+                {/* Presets rápidos de días */}
+                <div>
+                  <label className="block text-[11px] text-zinc-400 font-medium mb-1.5">Duración Rápida</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[
+                      { label: '7 Días', days: '7' },
+                      { label: '1 Mes (30d)', days: '30' },
+                      { label: '3 Meses (90d)', days: '90' },
+                      { label: '1 Año (365d)', days: '365' }
+                    ].map((opt) => (
+                      <button
+                        key={opt.days}
+                        type="button"
+                        onClick={() => setGiftDaysInput(opt.days)}
+                        className={`py-2 rounded-xl border text-xs font-bold transition-all ${
+                          giftDaysInput === opt.days 
+                            ? 'bg-amber-500/20 border-amber-500 text-amber-400 shadow-sm' 
+                            : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Botones de Acción */}
+                <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const days = parseInt(giftDaysInput) || 30;
+                      handleGiftPass(giftPlanInput, days);
+                    }}
+                    className="w-full sm:flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-zinc-950 font-extrabold text-xs shadow-lg shadow-amber-500/20 transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                  >
+                    <span>🎁 Otorgar Pase ({giftDaysInput || 30} días - {giftPlanInput.toUpperCase()})</span>
+                  </button>
+
+                  {u.giftDays > 0 && (
+                    <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newDays = (u.giftDays || 0) + 7;
+                          handleGiftPass(u.plan, newDays);
+                        }}
+                        title="Extender pase +7 días"
+                        className="flex-1 sm:flex-initial px-3 py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-xs font-bold transition-all active:scale-95"
+                      >
+                        +7d
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newDays = Math.max(1, (u.giftDays || 0) - 7);
+                          handleGiftPass(u.plan, newDays);
+                        }}
+                        title="Acortar pase -7 días"
+                        className="flex-1 sm:flex-initial px-3 py-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-xs font-bold transition-all active:scale-95"
+                      >
+                        -7d
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {u.plan !== defaultPlanId && (
+                  <button
+                    type="button"
+                    onClick={handleRevokePass}
+                    className="w-full py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                  >
+                    🚫 Revocar Pase → Volver a {plansById[defaultPlanId]?.name || defaultPlanId}
+                  </button>
+                )}
+              </div>
+
+              {/* Administración */}
+              <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800/80 space-y-3">
+                <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5 text-orange-400" /> Administración
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    onClick={() => handleSaveRole(u.role === 'admin' ? 'user' : 'admin')}
+                    className={`py-2.5 rounded-xl border text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 ${
+                      u.role === 'admin'
+                        ? 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700'
+                        : 'bg-orange-500/10 border-orange-500/30 text-orange-400 hover:bg-orange-500/20'
+                    }`}
+                  >
+                    <Shield className="w-3.5 h-3.5" />
+                    {u.role === 'admin' ? 'Quitar rol Admin → User' : 'Promover a Admin'}
+                  </button>
+                  <button
+                    onClick={handleToggleStatus}
+                    className={`py-2.5 rounded-xl border text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 ${
+                      u.status === 'active'
+                        ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 hover:bg-rose-500/20'
+                        : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                    }`}
+                  >
+                    {u.status === 'active' ? '⏸️ Suspender Cuenta' : '▶️ Reactivar Cuenta'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setNoticeModal({
+                        title: 'Restablecer Contraseña',
+                        message: `Se ha enviado un correo oficial a ${u.email} con el enlace seguro para restablecer su contraseña.`,
+                        type: 'info'
+                      });
+                    }}
+                    className="py-2.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs font-bold hover:bg-zinc-700 transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                  >
+                    🔑 Reset Contraseña
+                  </button>
+                  <button
+                    onClick={() => {
+                      setInspectingUser(u);
+                      setSelectedAdminUser(null);
+                      setActiveTab('dashboard');
+                    }}
+                    className="py-2.5 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs font-bold hover:bg-orange-500/20 transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                  >
+                    👁️ Inspeccionar Cuenta
+                  </button>
+                </div>
+              </div>
+
+              {/* Zona peligrosa */}
+              <div className="border-t border-zinc-800 pt-4">
                 <button
-                  type="button"
-                  onClick={() => setShowGiftModal(null)}
-                  className="px-4 py-2.5 rounded-xl bg-zinc-800 text-zinc-300 font-bold hover:bg-zinc-700 transition-all"
+                  onClick={() => {
+                    setSelectedAdminUser(null);
+                    handleDeleteUser(u);
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5"
                 >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-zinc-950 font-extrabold shadow-lg shadow-amber-500/25 transition-all flex items-center gap-1.5"
-                >
-                  <span>🎁 Otorgar Membresía</span>
+                  <Trash2 className="w-3.5 h-3.5" /> Eliminar Usuario Definitivamente
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* MODAL BOTTOM SHEET: NUEVA / EDITAR INTERVENCIÓN COMPLETA */}
       {showAddMaintenanceModal && (
@@ -3617,10 +3734,14 @@ export function App() {
           <div className="w-full max-w-md bg-zinc-900 rounded-t-3xl sm:rounded-3xl border border-zinc-800 p-6 space-y-4 animate-in slide-in-from-bottom duration-200">
             <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
               <div>
-                <h3 className="font-bold text-base text-white">Añadir Nuevo Vehículo</h3>
-                <p className="text-xs text-zinc-400">Registra una nueva moto, vehículo o máquina en tu garaje.</p>
+                <h3 className="font-bold text-base text-white">
+                  {editingVehicleId ? (language === 'es' ? 'Editar Vehículo' : 'Edit Vehicle') : (language === 'es' ? 'Añadir Nuevo Vehículo' : 'Add New Vehicle')}
+                </h3>
+                <p className="text-xs text-zinc-400">
+                  {editingVehicleId ? (language === 'es' ? 'Modifica los datos del vehículo' : 'Edit vehicle information') : (language === 'es' ? 'Registra una nueva moto, vehículo o máquina en tu garaje.' : 'Register a new bike, car or machine.')}
+                </p>
               </div>
-              <button onClick={() => setShowAddVehicleModal(false)} className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center font-bold text-sm">✕</button>
+              <button onClick={() => { setShowAddVehicleModal(false); setEditingVehicleId(null); }} className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center font-bold text-sm">✕</button>
             </div>
             
             <form onSubmit={handleCreateVehicle} className="space-y-3.5 text-xs">
@@ -4097,6 +4218,149 @@ export function App() {
         </div>
       )}
 
+      {/* MODAL: CREAR / EDITAR PLAN DE SUSCRIPCIÓN */}
+      {editingPlan && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-md bg-zinc-900 rounded-3xl border border-zinc-800 p-6 space-y-4 shadow-2xl animate-in zoom-in-95 duration-150 my-8">
+            <h3 className="font-extrabold text-base text-white tracking-tight">
+              {editingPlan.id ? `Editar ${editingPlan.name}` : 'Crear Plan Nuevo'}
+            </h3>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-zinc-400 font-medium mb-1">Nombre</label>
+                <input
+                  type="text"
+                  value={editingPlan.name}
+                  onChange={(e) => setEditingPlan(prev => ({ ...prev, name: e.target.value }))}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-medium"
+                  placeholder="Ej: DIY Garage"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-zinc-400 font-medium mb-1">Precio mensual (€)</label>
+                  <input
+                    type="number" step="0.01" min="0"
+                    value={editingPlan.priceMonthly}
+                    onChange={(e) => setEditingPlan(prev => ({ ...prev, priceMonthly: e.target.value }))}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-zinc-400 font-medium mb-1">Precio anual (€/mes)</label>
+                  <input
+                    type="number" step="0.01" min="0"
+                    value={editingPlan.priceAnnual}
+                    onChange={(e) => setEditingPlan(prev => ({ ...prev, priceAnnual: e.target.value }))}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="flex items-center gap-2 text-zinc-400 font-medium mb-1">
+                  <input
+                    type="checkbox"
+                    checked={!!editingPlan.unlimited}
+                    onChange={(e) => setEditingPlan(prev => ({ ...prev, unlimited: e.target.checked }))}
+                    className="accent-orange-500"
+                  />
+                  Vehículos ilimitados
+                </label>
+                {!editingPlan.unlimited && (
+                  <input
+                    type="number" min="0"
+                    value={editingPlan.maxVehicles}
+                    onChange={(e) => setEditingPlan(prev => ({ ...prev, maxVehicles: e.target.value }))}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-mono mt-1"
+                    placeholder="Límite de vehículos"
+                  />
+                )}
+              </div>
+
+              <div>
+                <label className="block text-zinc-400 font-medium mb-1">Color del badge</label>
+                <div className="flex flex-wrap gap-2">
+                  {Object.keys(PLAN_COLOR_STYLES).map(color => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => setEditingPlan(prev => ({ ...prev, badgeColor: color }))}
+                      className={`px-2.5 py-1 rounded-lg border text-[10px] font-mono font-bold ${PLAN_COLOR_STYLES[color].badge} ${
+                        editingPlan.badgeColor === color ? 'ring-2 ring-white/60' : ''
+                      }`}
+                    >
+                      {color}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-zinc-400 font-medium mb-1">Características (una por línea)</label>
+                <textarea
+                  value={editingPlan.featuresText}
+                  onChange={(e) => setEditingPlan(prev => ({ ...prev, featuresText: e.target.value }))}
+                  rows={4}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-medium resize-none"
+                  placeholder={'Alertas de mantenimiento\nGestión de repuestos\nSoporte prioritario'}
+                />
+              </div>
+
+              <div className="flex items-center gap-4 flex-wrap">
+                <label className="flex items-center gap-2 text-zinc-400 font-medium">
+                  <input
+                    type="checkbox"
+                    checked={!!editingPlan.highlight}
+                    onChange={(e) => setEditingPlan(prev => ({ ...prev, highlight: e.target.checked }))}
+                    className="accent-orange-500"
+                  />
+                  Destacar ("Más Popular")
+                </label>
+                <label className="flex items-center gap-2 text-zinc-400 font-medium">
+                  <input
+                    type="checkbox"
+                    checked={editingPlan.active !== false}
+                    onChange={(e) => setEditingPlan(prev => ({ ...prev, active: e.target.checked, isDefaultSignup: e.target.checked ? prev.isDefaultSignup : false }))}
+                    className="accent-orange-500"
+                  />
+                  Plan activo (visible para nuevos registros)
+                </label>
+                <label className={`flex items-center gap-2 font-medium ${editingPlan.active === false ? 'text-zinc-600' : 'text-zinc-400'}`}>
+                  <input
+                    type="checkbox"
+                    checked={!!editingPlan.isDefaultSignup}
+                    disabled={editingPlan.active === false}
+                    onChange={(e) => setEditingPlan(prev => ({ ...prev, isDefaultSignup: e.target.checked }))}
+                    className="accent-orange-500"
+                  />
+                  Plan por defecto para nuevos registros
+                </label>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditingPlan(null)}
+                className="py-3 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs border border-zinc-700/70 transition-all active:scale-95"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSavePlanConfig}
+                className="py-3 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow-lg shadow-orange-500/25 transition-all active:scale-95"
+              >
+                Guardar Plan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL PERSONALIZADO DE CONFIRMACIÓN DE BORRADO */}
       {confirmModal && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -4127,6 +4391,45 @@ export function App() {
                 className="py-3 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs shadow-lg shadow-rose-500/25 transition-all active:scale-95"
               >
                 Confirmar Borrado
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PERSONALIZADO DE NOTIFICACIÓN / ALERTA CON ESTILO OSCURO */}
+      {noticeModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-zinc-900 rounded-3xl border border-zinc-800 p-6 space-y-4 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto ${
+              noticeModal.type === 'success' ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' :
+              noticeModal.type === 'error' || noticeModal.type === 'danger' ? 'bg-rose-500/10 border border-rose-500/20 text-rose-400' :
+              'bg-orange-500/10 border border-orange-500/20 text-orange-400'
+            }`}>
+              {noticeModal.type === 'success' ? <CheckCircle2 className="w-6 h-6 stroke-[2]" /> :
+               noticeModal.type === 'error' || noticeModal.type === 'danger' ? <ShieldAlert className="w-6 h-6 stroke-[2]" /> :
+               <Sparkles className="w-6 h-6 stroke-[2]" />}
+            </div>
+            
+            <div className="text-center space-y-1">
+              <h3 className="font-extrabold text-base text-white tracking-tight">{noticeModal.title}</h3>
+              <p className="text-xs text-zinc-400 leading-relaxed">{noticeModal.message}</p>
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (noticeModal.onConfirm) noticeModal.onConfirm();
+                  setNoticeModal(null);
+                }}
+                className={`w-full py-3 rounded-2xl font-bold text-xs shadow-lg transition-all active:scale-95 ${
+                  noticeModal.type === 'success' ? 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/25' :
+                  noticeModal.type === 'error' || noticeModal.type === 'danger' ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/25' :
+                  'bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/25'
+                }`}
+              >
+                {noticeModal.buttonText || 'Aceptar'}
               </button>
             </div>
           </div>
@@ -4228,7 +4531,7 @@ function VehicleBentoCard({ vehicle, maintenances = [], language = 'es', onSelec
     .reduce((sum, m) => sum + (parseFloat((m.cost || '').replace(/[^0-9.]/g, '')) || 0), 0);
 
   const statusLabel = vehicle.status === 'ok' 
-    ? (language === 'es' ? 'Al día' : language === 'en' ? 'Up to date' : 'Aggiornato')
+    ? (TRANSLATIONS[language]?.statusOk || TRANSLATIONS.es.statusOk)
     : vehicle.statusText;
 
   return (
@@ -4252,21 +4555,7 @@ function VehicleBentoCard({ vehicle, maintenances = [], language = 'es', onSelec
             </div>
           </div>
           
-          <div className="flex items-center gap-1">
-            {onDelete && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete(vehicle.id);
-                }}
-                title={language === 'es' ? 'Eliminar Vehículo' : language === 'en' ? 'Delete Vehicle' : 'Elimina Veicolo'}
-                className="p-1.5 rounded-lg text-zinc-600 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            )}
-            <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-orange-400 transition-colors" />
-          </div>
+          <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-orange-400 transition-colors shrink-0" />
         </div>
 
         {/* Indicador de Uso, Gasto Acumulado & Botón Rápido */}

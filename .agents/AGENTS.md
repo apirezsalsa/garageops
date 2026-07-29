@@ -5,7 +5,9 @@
 **GarageOps** es una aplicación de gestión de mantenimiento de vehículos y flota. Permite registrar vehículos (motos, coches, vehículos de soporte), programar alertas de mantenimiento, gestionar un inventario de repuestos, y llevar un historial completo de intervenciones. Es un producto **SaaS** con planes de suscripción (Starter, Pro, Unlimited).
 
 > [!IMPORTANT]
-> **Estado del desarrollo:** El panel web es el **proyecto real, actual y prioritario**. La aplicación móvil está temporalmente desfasada y en el futuro se reescribirá/actualizará para alinearse e igualarse con la versión web.
+> **Modo de desarrollo activo:** Todas las modificaciones y pruebas se deben realizar **exclusivamente en local** (`cd web && npm run dev`). NO subir ni desplegar a producción (Vercel / GitHub push) hasta haber avanzado significativamente y que el usuario lo solicite explícitamente.
+> 
+> **Estado de las plataformas:** El panel web es el **proyecto real, actual y prioritario**. La aplicación móvil está temporalmente desfasada y en el futuro se reescribirá/actualizará para alinearse e igualarse con la versión web.
 
 El proyecto tiene **dos plataformas**:
 
@@ -196,3 +198,14 @@ npm run build    # Build de producción → dist/
 - [x] Añadir verificación server-side del rol SuperAdmin — **Resuelto**: `isSuperAdmin` ahora lee `role` y `plan` del documento Firestore del usuario. El check de email solo actúa como fallback mientras carga el perfil.
 - [x] Completar las traducciones web — **Resuelto**: añadidos `fr` (Français), `de` (Deutsch) y `pt` (Português) al objeto `TRANSLATIONS`. El selector de idioma en login y en perfil muestra los 6 idiomas.
 - [ ] ~~Implementar el endpoint `maintenance/all` en `webApi.js`~~ — **Pospuesto hasta migración mobile** (el panel web usa Firestore directamente con `onSnapshot`, no necesita `webApi.js`)
+
+---
+
+## Estado de la Sesión Reciente
+
+- [x] **Flujo de Trabajo:** Configurado desarrollo **exclusivamente en local** (`cd web && npm run dev`). Despliegues a producción en pausa hasta completar nuevas iteraciones.
+- [x] **Skill Ponytail:** Instalada en `.agents/skills/ponytail/SKILL.md`. Limpieza de código completada: eliminados archivos muertos (`counter.ts`, `main.ts`, assets del template Vite), desinstalado `clsx`, desacopladas traducciones a `web/src/locales.js` y eliminados datos mock `INITIAL_*`.
+- [x] **Backoffice de Administración:** `firestore.rules` actualizadas para permitir a admins consultar la colección `/users`. Corregida la vista de usuarios en el Backoffice para listar usuarios reales de Firestore en tiempo real.
+- [x] **Diseño de Modales:** Reemplazadas todas las alertas y confirmaciones nativas (`alert`, `confirm`) por un sistema de modales oscuros personalizados con diseño unificado (`bg-zinc-900`, `rounded-3xl`, `border-zinc-800`).
+- [x] **Garaje & Edición de Vehículos:** Eliminado botón de papelera en las tarjetas de lista de vehículos (evita borrado accidental). Añadido botón e integración de **Edición de Vehículos** (`Edit2`) en el detalle del vehículo.
+- [x] **Skill Context7:** Instalada en `.agents/skills/context7/SKILL.md`. Auditadas y actualizadas dependencias en local (`vite 5.4.21`, `@vitejs/plugin-react 4.7.0`, `lucide-react 1.27.0`) con React 19, Firebase 12 y Tailwind v4.

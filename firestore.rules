@@ -2,30 +2,62 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Reglas para la colección users
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    function isAdmin() {
+      return request.auth != null && (
+        request.auth.token.email.matches('.*apirezsalsa.*') ||
+        request.auth.token.email == 'demo@garageops.io' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
     }
-    
+
+    // Reglas para la colección users
+    // Permite lectura y escritura a cada usuario sobre su propio documento,
+    // y acceso de lectura/escritura completo a administradores para el Backoffice
+    match /users/{userId} {
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      allow create: if request.auth != null && request.auth.uid == userId
+        && (request.resource.data.role != 'admin' || isAdmin());
+      allow update: if request.auth != null && (
+        (request.auth.uid == userId && request.resource.data.role == resource.data.role) ||
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
     // Reglas para vehicles
+    // Los admins pueden leer/escribir todos los vehículos (conteo del Backoffice y Modo Inspección)
     match /vehicles/{vehicleId} {
-      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
-      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow read: if request.auth != null && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if request.auth != null && (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow update, delete: if request.auth != null && (resource.data.userId == request.auth.uid || isAdmin());
     }
 
     // Reglas para maintenances
     match /maintenances/{maintenanceId} {
-      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
-      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow read: if request.auth != null && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if request.auth != null && (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow update, delete: if request.auth != null && (resource.data.userId == request.auth.uid || isAdmin());
     }
 
     // Reglas para parts
     match /parts/{partId} {
-      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
-      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow read: if request.auth != null && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if request.auth != null && (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow update, delete: if request.auth != null && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // Reglas para auditLogs (registro de acciones realizadas por admins en Modo Inspección)
+    // Solo los admins pueden crear y leer entradas; nadie puede modificar/borrar un log ya creado
+    match /auditLogs/{logId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // Reglas para plans (planes de suscripción configurables desde el Backoffice)
+    // Cualquier usuario autenticado puede leerlos (se muestran en Ajustes); solo admins escriben
+    match /plans/{planId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
     }
   }
 }
