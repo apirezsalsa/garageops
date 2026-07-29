@@ -22,7 +22,8 @@ import {
   query,
   where,
   orderBy,
-  serverTimestamp 
+  serverTimestamp,
+  Timestamp
 } from 'firebase/firestore';
 import { 
   Home, 
@@ -110,6 +111,32 @@ const SEED_PLANS = [
   }
 ];
 
+// Convierte cualquier representación de fecha (Timestamp de Firestore, string ISO, Date) a milisegundos epoch
+const toDateMs = (val, fallbackMs) => {
+  if (!val) return fallbackMs;
+  if (typeof val.seconds === 'number') return val.seconds * 1000;
+  const ms = new Date(val).getTime();
+  return isNaN(ms) ? fallbackMs : ms;
+};
+
+// Suma N meses a una fecha respetando desbordes de fin de mes
+const addMonths = (date, months) => {
+  const d = new Date(date);
+  d.setMonth(d.getMonth() + months);
+  return d;
+};
+
+// Calcula la próxima fecha de renovación (>= ahora) anclada a la fecha de alta original del plan
+const computeNextRenewal = (startMs, billingCycle, now = Date.now()) => {
+  const step = billingCycle === 'annual' ? 12 : 1;
+  let renewal = new Date(startMs || now);
+  if (isNaN(renewal.getTime())) renewal = new Date(now);
+  while (renewal.getTime() <= now) {
+    renewal = addMonths(renewal, step);
+  }
+  return renewal;
+};
+
 // Función para procesar, recortar al centro en cuadrado (1:1) y optimizar fotos del usuario
 const optimizeImageFile = (file) => {
   return new Promise((resolve) => {
@@ -178,6 +205,9 @@ export function App() {
               email: user.email,
               role: isApiRez ? 'admin' : 'user',
               plan: isApiRez ? 'unlimited' : defaultPlanIdRef.current,
+              billingCycle: 'monthly',
+              planStartDate: serverTimestamp(),
+              pendingPlanChange: null,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp()
             });
@@ -374,6 +404,9 @@ export function App() {
         await setDoc(doc(db, 'users', cred.user.uid), {
           email: loginForm.email,
           plan: defaultPlanIdRef.current,
+          billingCycle: 'monthly',
+          planStartDate: serverTimestamp(),
+          pendingPlanChange: null,
           createdAt: serverTimestamp()
         });
       } else {
@@ -553,6 +586,8 @@ export function App() {
             email: data.email || `user_${d.id.slice(0, 5)}@garageops.io`,
             role: data.role || 'user',
             plan: data.plan || defaultPlanId,
+            billingCycle: data.billingCycle || 'monthly',
+            pendingPlanChange: data.pendingPlanChange || null,
             giftDays: data.giftDays || 0,
             giftPlanExpiry: data.giftPlanExpiry || null,
             status: data.status || 'active',
@@ -656,7 +691,7 @@ export function App() {
     localStorage.setItem('garageops_language', language);
   }, [language]);
 
-  // Estado de Plan SaaS Activo y Frecuencia de Facturación
+  // Estado de Plan Activo y Frecuencia de Facturación
   const activeUserPlan = (userProfile?.role === 'admin' || userEmail?.toLowerCase() === 'apirezsalsa@gmail.com') 
     ? 'unlimited' 
     : (userProfile?.plan || localStorage.getItem('garageops_plan') || 'pro');
@@ -667,7 +702,13 @@ export function App() {
     setCurrentPlan(activeUserPlan);
   }, [activeUserPlan]);
 
-  const [billingCycle, setBillingCycle] = useState('monthly');
+  // Ciclo de facturación realmente contratado (persistido en Firestore); por defecto mensual
+  const activeBillingCycle = userProfile?.billingCycle || 'monthly';
+  // Selector de la UI de Ajustes: qué ciclo se está previsualizando/eligiendo (empieza igualado al contratado)
+  const [billingCycle, setBillingCycle] = useState(activeBillingCycle);
+  useEffect(() => {
+    setBillingCycle(activeBillingCycle);
+  }, [activeBillingCycle]);
 
   // Definición del plan activo y límite de vehículos derivados de la configuración dinámica (colección 'plans')
   const currentPlanDef = plansById[currentPlan];
@@ -677,6 +718,71 @@ export function App() {
   React.useEffect(() => {
     localStorage.setItem('garageops_plan', currentPlan);
   }, [currentPlan]);
+
+  // Fecha de alta del plan (ancla de facturación) y próxima renovación calculada a partir de ella
+  const planStartMs = toDateMs(userProfile?.planStartDate, Date.now());
+  const nextRenewalDate = useMemo(
+    () => computeNextRenewal(planStartMs, activeBillingCycle),
+    [planStartMs, activeBillingCycle]
+  );
+
+  // Cambio de plan/ciclo pendiente (programado para hacerse efectivo en la próxima renovación, sin devoluciones ni prorrateos)
+  const pendingPlanChange = userProfile?.pendingPlanChange || null;
+
+  // Cuando la renovación programada ya se ha cumplido, aplica el cambio de plan pendiente
+  useEffect(() => {
+    if (!firebaseUser || !pendingPlanChange?.effectiveAt) return;
+    const effectiveMs = new Date(pendingPlanChange.effectiveAt).getTime();
+    if (isNaN(effectiveMs) || Date.now() < effectiveMs) return;
+    const userDocRef = doc(db, 'users', firebaseUser.uid);
+    updateDoc(userDocRef, {
+      plan: pendingPlanChange.planId,
+      billingCycle: pendingPlanChange.billingCycle || 'monthly',
+      planStartDate: Timestamp.fromDate(new Date(effectiveMs)),
+      pendingPlanChange: null,
+      updatedAt: serverTimestamp()
+    }).catch(err => console.warn('Error al aplicar el cambio de plan programado:', err));
+  }, [firebaseUser, pendingPlanChange]);
+
+  // Programa un cambio de plan y/o ciclo de facturación para la próxima renovación (nunca inmediato, nunca con devolución/prorrateo)
+  const handlePlanSelection = async (targetPlanId, targetBillingCycle) => {
+    if (!firebaseUser) return;
+    const userDocRef = doc(db, 'users', firebaseUser.uid);
+    try {
+      await updateDoc(userDocRef, {
+        pendingPlanChange: {
+          planId: targetPlanId,
+          billingCycle: targetBillingCycle,
+          effectiveAt: nextRenewalDate.toISOString()
+        },
+        updatedAt: serverTimestamp()
+      });
+      const planName = plansById[targetPlanId]?.name || targetPlanId;
+      const renewalLabel = nextRenewalDate.toLocaleDateString(language === 'es' ? 'es-ES' : language === 'en' ? 'en-US' : 'it-IT');
+      setNoticeModal({
+        title: language === 'es' ? 'Cambio de Plan Programado' : language === 'en' ? 'Plan Change Scheduled' : 'Cambio Pianificato',
+        message: language === 'es'
+          ? `Tu plan cambiará a ${planName} a partir de tu próxima renovación (${renewalLabel}). Los cambios de plan nunca son inmediatos ni generan devoluciones o prorrateos del importe ya abonado.`
+          : language === 'en'
+            ? `Your plan will change to ${planName} starting your next renewal (${renewalLabel}). Plan changes are never immediate and no refunds or prorated credits are issued.`
+            : `Il tuo piano cambierà in ${planName} a partire dal prossimo rinnovo (${renewalLabel}). Nessun rimborso o storno per i cambi di piano.`,
+        type: 'success'
+      });
+    } catch (err) {
+      console.error('Error al programar el cambio de plan:', err);
+      setNoticeModal({ title: 'Error', message: 'No se pudo programar el cambio de plan.', type: 'warning' });
+    }
+  };
+
+  // Cancela un cambio de plan/ciclo previamente programado, volviendo a dejar el plan actual sin cambios futuros
+  const handleCancelPendingPlanChange = async () => {
+    if (!firebaseUser) return;
+    try {
+      await updateDoc(doc(db, 'users', firebaseUser.uid), { pendingPlanChange: null, updatedAt: serverTimestamp() });
+    } catch (err) {
+      console.error('Error al cancelar el cambio de plan programado:', err);
+    }
+  };
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [showAddMaintenanceModal, setShowAddMaintenanceModal] = useState(false);
   const [showAddVehicleModal, setShowAddVehicleModal] = useState(false);
@@ -1206,7 +1312,7 @@ export function App() {
           </tbody>
         </table>
         <div class="footer">
-          Generado automáticamente por GarageOps SaaS • Mobile First Vehicle Maintenance System
+          Generado automáticamente por GarageOps • Mobile First Vehicle Maintenance System
         </div>
         <script>
           window.onload = function() { window.print(); };
@@ -2630,13 +2736,36 @@ export function App() {
                     {currentPlanDef?.name || currentPlan}
                   </h3>
                   <p className="text-xs text-zinc-400 mt-1 font-mono">
-                    {language === 'es' ? 'Renovación automática el 25/08/2026' : language === 'en' ? 'Auto-renewal on 08/25/2026' : 'Rinnovo automatico il 25/08/2026'}
+                    {language === 'es'
+                      ? `Renovación automática el ${nextRenewalDate.toLocaleDateString('es-ES')} (${activeBillingCycle === 'annual' ? 'anual' : 'mensual'})`
+                      : language === 'en'
+                        ? `Auto-renewal on ${nextRenewalDate.toLocaleDateString('en-US')} (${activeBillingCycle === 'annual' ? 'annual' : 'monthly'})`
+                        : `Rinnovo automatico il ${nextRenewalDate.toLocaleDateString('it-IT')} (${activeBillingCycle === 'annual' ? 'annuale' : 'mensile'})`}
                   </p>
                 </div>
                 <div className="w-14 h-14 rounded-2xl bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400 shrink-0">
                   <Zap className="w-7 h-7 stroke-[2.5]" />
                 </div>
               </div>
+
+              {pendingPlanChange && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+                  <p className="text-xs text-amber-300 font-medium">
+                    {language === 'es'
+                      ? <>Tu plan cambiará a <strong>{plansById[pendingPlanChange.planId]?.name || pendingPlanChange.planId}</strong> ({pendingPlanChange.billingCycle === 'annual' ? 'anual' : 'mensual'}) el <strong>{new Date(pendingPlanChange.effectiveAt).toLocaleDateString('es-ES')}</strong>. Sin devoluciones ni prorrateos.</>
+                      : language === 'en'
+                        ? <>Your plan will change to <strong>{plansById[pendingPlanChange.planId]?.name || pendingPlanChange.planId}</strong> ({pendingPlanChange.billingCycle === 'annual' ? 'annual' : 'monthly'}) on <strong>{new Date(pendingPlanChange.effectiveAt).toLocaleDateString('en-US')}</strong>. No refunds or prorated credits.</>
+                        : <>Il tuo piano cambierà in <strong>{plansById[pendingPlanChange.planId]?.name || pendingPlanChange.planId}</strong> il <strong>{new Date(pendingPlanChange.effectiveAt).toLocaleDateString('it-IT')}</strong>.</>}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleCancelPendingPlanChange}
+                    className="shrink-0 px-3 py-1.5 rounded-xl text-[11px] font-bold bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-600 transition-all"
+                  >
+                    {language === 'es' ? 'Cancelar cambio' : language === 'en' ? 'Cancel change' : 'Annulla'}
+                  </button>
+                </div>
+              )}
 
               {/* Barra de Consumo de Recursos del Plan */}
               <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800 space-y-3">
@@ -2687,7 +2816,8 @@ export function App() {
               {/* TABLA COMPARATIVA DE PLANES SAAS (configurados dinámicamente desde el Backoffice) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
                 {plans.filter(plan => plan.active !== false || plan.id === currentPlan).map(plan => {
-                  const isCurrent = currentPlan === plan.id;
+                  const isCurrent = currentPlan === plan.id && billingCycle === activeBillingCycle;
+                  const isPendingTarget = pendingPlanChange?.planId === plan.id && pendingPlanChange?.billingCycle === billingCycle;
                   const isDiscontinued = plan.active === false;
                   const price = billingCycle === 'monthly' ? plan.priceMonthly : plan.priceAnnual;
                   const planMaxVeh = plan.maxVehicles === -1 ? '∞' : plan.maxVehicles;
@@ -2737,14 +2867,21 @@ export function App() {
 
                       <button
                         type="button"
-                        onClick={() => setCurrentPlan(plan.id)}
+                        disabled={isCurrent || isDiscontinued || isPendingTarget}
+                        onClick={() => handlePlanSelection(plan.id, billingCycle)}
                         className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all ${
-                          isCurrent
+                          isCurrent || isPendingTarget
                             ? 'bg-zinc-800 text-zinc-400 cursor-default'
-                            : 'bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-500/25'
+                            : isDiscontinued
+                              ? 'bg-zinc-900 text-zinc-600 cursor-not-allowed'
+                              : 'bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-500/25'
                         }`}
                       >
-                        {isCurrent ? (language === 'es' ? 'Plan Actual' : language === 'en' ? 'Current Plan' : 'Piano Attuale') : (language === 'es' ? `Seleccionar ${plan.name}` : language === 'en' ? `Select ${plan.name}` : `Seleziona ${plan.name}`)}
+                        {isCurrent
+                          ? (language === 'es' ? 'Plan Actual' : language === 'en' ? 'Current Plan' : 'Piano Attuale')
+                          : isPendingTarget
+                            ? (language === 'es' ? 'Programado' : language === 'en' ? 'Scheduled' : 'Pianificato')
+                            : (language === 'es' ? `Seleccionar ${plan.name}` : language === 'en' ? `Select ${plan.name}` : `Seleziona ${plan.name}`)}
                       </button>
                     </div>
                   );
@@ -2872,7 +3009,7 @@ export function App() {
                   🛡️ Backoffice de Administración
                 </h2>
                 <p className="text-xs text-zinc-400 mt-0.5">
-                  Control global de usuarios, estado de suscripciones SaaS y métricas de plataforma.
+                  Control global de usuarios, estado de suscripciones y métricas de plataforma.
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -2881,7 +3018,7 @@ export function App() {
                   className="px-3.5 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-xs font-bold text-zinc-300 hover:text-white transition-all flex items-center gap-1.5"
                 >
                   <FileText className="w-3.5 h-3.5 text-orange-400" />
-                  <span>Exportar Reporte SaaS</span>
+                  <span>Exportar Reporte</span>
                 </button>
               </div>
             </div>
@@ -3171,13 +3308,53 @@ export function App() {
 
         const handleSavePlan = async (newPlan) => {
           try {
-            await updateDoc(doc(db, 'users', u.id), { plan: newPlan, updatedAt: serverTimestamp() });
-            setAllUsersList(prev => prev.map(item => item.id === u.id ? { ...item, plan: newPlan } : item));
-            setSelectedAdminUser(prev => prev ? { ...prev, plan: newPlan } : prev);
+            // Un cambio manual de plan desde el Backoffice es inmediato y cancela cualquier cambio programado por el usuario
+            await updateDoc(doc(db, 'users', u.id), {
+              plan: newPlan,
+              planStartDate: serverTimestamp(),
+              pendingPlanChange: null,
+              updatedAt: serverTimestamp()
+            });
+            setAllUsersList(prev => prev.map(item => item.id === u.id ? { ...item, plan: newPlan, pendingPlanChange: null } : item));
+            setSelectedAdminUser(prev => prev ? { ...prev, plan: newPlan, pendingPlanChange: null } : prev);
             setNoticeModal({ title: 'Plan Actualizado', message: `${u.email} → ${plansById[newPlan]?.name || newPlan}`, type: 'success' });
           } catch (err) {
             console.error('Error al cambiar plan:', err);
             setNoticeModal({ title: 'Error', message: 'No se pudo cambiar el plan.', type: 'warning' });
+          }
+        };
+
+        // Cancela, desde el Backoffice, un cambio de plan programado por el propio usuario (sin tocar su plan actual)
+        const handleCancelUserPendingChange = async () => {
+          try {
+            await updateDoc(doc(db, 'users', u.id), { pendingPlanChange: null, updatedAt: serverTimestamp() });
+            setAllUsersList(prev => prev.map(item => item.id === u.id ? { ...item, pendingPlanChange: null } : item));
+            setSelectedAdminUser(prev => prev ? { ...prev, pendingPlanChange: null } : prev);
+            setNoticeModal({ title: 'Cambio Cancelado', message: `Se canceló el cambio de plan programado de ${u.email}.`, type: 'success' });
+          } catch (err) {
+            console.error('Error al cancelar el cambio de plan programado:', err);
+            setNoticeModal({ title: 'Error', message: 'No se pudo cancelar el cambio programado.', type: 'warning' });
+          }
+        };
+
+        // Aplica de inmediato el cambio de plan que el usuario tenía programado para su próxima renovación
+        const handleApplyUserPendingChangeNow = async () => {
+          const pending = u.pendingPlanChange;
+          if (!pending) return;
+          try {
+            await updateDoc(doc(db, 'users', u.id), {
+              plan: pending.planId,
+              billingCycle: pending.billingCycle || 'monthly',
+              planStartDate: serverTimestamp(),
+              pendingPlanChange: null,
+              updatedAt: serverTimestamp()
+            });
+            setAllUsersList(prev => prev.map(item => item.id === u.id ? { ...item, plan: pending.planId, billingCycle: pending.billingCycle || 'monthly', pendingPlanChange: null } : item));
+            setSelectedAdminUser(prev => prev ? { ...prev, plan: pending.planId, billingCycle: pending.billingCycle || 'monthly', pendingPlanChange: null } : prev);
+            setNoticeModal({ title: 'Cambio Aplicado', message: `${u.email} → ${plansById[pending.planId]?.name || pending.planId} aplicado de inmediato.`, type: 'success' });
+          } catch (err) {
+            console.error('Error al aplicar el cambio de plan programado:', err);
+            setNoticeModal({ title: 'Error', message: 'No se pudo aplicar el cambio programado.', type: 'warning' });
           }
         };
 
@@ -3285,6 +3462,28 @@ export function App() {
                 <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
                   <Zap className="w-3.5 h-3.5 text-amber-400" /> Plan & Suscripción
                 </h4>
+                {u.pendingPlanChange && (
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center gap-2.5 justify-between">
+                    <p className="text-xs text-amber-300 font-medium">
+                      Cambio programado a <strong>{plansById[u.pendingPlanChange.planId]?.name || u.pendingPlanChange.planId}</strong> ({u.pendingPlanChange.billingCycle === 'annual' ? 'anual' : 'mensual'}) el{' '}
+                      <strong>{new Date(u.pendingPlanChange.effectiveAt).toLocaleDateString('es-ES')}</strong>.
+                    </p>
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        onClick={handleApplyUserPendingChangeNow}
+                        className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 transition-all"
+                      >
+                        Aplicar ahora
+                      </button>
+                      <button
+                        onClick={handleCancelUserPendingChange}
+                        className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-600 transition-all"
+                      >
+                        Cancelar cambio
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center gap-2">
                   {plans.map(p => (
                     <button
