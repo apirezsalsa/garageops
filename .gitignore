@@ -44,3 +44,9 @@ yarn-error.*
 *.apk
 temp-app/
 garageops_structure.json
+
+# Firebase deploy cache
+.firebase/
+
+# landing tiene su propio repo git (mygarageops-landing/.git)
+mygarageops-landing/

@@ -1,5 +1,18 @@
 {
   "projects": {
     "default": "garageops-6511f"
-  }
+  },
+  "targets": {
+    "garageops-6511f": {
+      "hosting": {
+        "landing": [
+          "mygarageops-landing"
+        ],
+        "app": [
+          "garageops-6511f"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }
