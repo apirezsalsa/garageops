@@ -1038,6 +1038,16 @@ export function App() {
     });
   };
 
+  // Unidades de medida disponibles para repuestos/consumibles (afecta cómo se descuenta el stock)
+  const PART_UNITS = [
+    { value: 'ud', label: 'Unidad (ud)' },
+    { value: 'L', label: 'Litro (L)' },
+    { value: 'ml', label: 'Mililitro (ml)' },
+    { value: 'kg', label: 'Kilogramo (kg)' },
+    { value: 'g', label: 'Gramo (g)' },
+    { value: 'm', label: 'Metro (m)' }
+  ];
+
   // Estado para Modal de Repuestos (Crear/Editar) y Lotes de Compra
   const [showAddPartModal, setShowAddPartModal] = useState(false);
   const [editingPartId, setEditingPartId] = useState(null);
@@ -1048,6 +1058,7 @@ export function App() {
   const [newPartForm, setNewPartForm] = useState({
     name: '',
     reference: '',
+    unit: 'ud',
     compatibleVehicles: [],
     minStock: '1',
     initialQty: '1',
@@ -1073,11 +1084,12 @@ export function App() {
       await firestoreUpdate('parts', editingPartId, {
         name: newPartForm.name,
         reference: newPartForm.reference || null,
+        unit: newPartForm.unit || 'ud',
         compatibleVehicles: newPartForm.compatibleVehicles.length > 0 ? newPartForm.compatibleVehicles : ['Universal'],
         minStock: minStockNum
       });
     } else {
-      const initialQtyNum = parseInt(newPartForm.initialQty) || 0;
+      const initialQtyNum = parseFloat(newPartForm.initialQty) || 0;
       const initialPriceNum = parseFloat(newPartForm.initialPrice) || 0;
 
       const initialPurchase = initialQtyNum > 0 ? [{
@@ -1091,6 +1103,7 @@ export function App() {
       const newPart = {
         name: newPartForm.name,
         reference: newPartForm.reference || null,
+        unit: newPartForm.unit || 'ud',
         compatibleVehicles: newPartForm.compatibleVehicles.length > 0 ? newPartForm.compatibleVehicles : ['Universal'],
         minStock: minStockNum,
         purchases: initialPurchase
@@ -1104,6 +1117,7 @@ export function App() {
     setNewPartForm({
       name: '',
       reference: '',
+      unit: 'ud',
       compatibleVehicles: [],
       minStock: '1',
       initialQty: '1',
@@ -1117,7 +1131,7 @@ export function App() {
     e.preventDefault();
     if (!showBatchModal) return;
 
-    const qtyNum = parseInt(newBatchForm.qty) || 1;
+    const qtyNum = parseFloat(newBatchForm.qty) || 1;
     const priceNum = parseFloat(newBatchForm.pricePerUnit) || 0;
 
     const newBatch = {
@@ -1143,6 +1157,7 @@ export function App() {
     setNewPartForm({
       name: p.name,
       reference: p.reference || '',
+      unit: p.unit || 'ud',
       compatibleVehicles: p.compatibleVehicles || (p.vehicle ? [p.vehicle] : ['Universal']),
       minStock: String(p.minStock || 1),
       initialQty: '0',
@@ -2464,6 +2479,7 @@ export function App() {
                   setNewPartForm({
                     name: '',
                     reference: '',
+                    unit: 'ud',
                     compatibleVehicles: [],
                     minStock: '1',
                     initialQty: '1',
@@ -2555,7 +2571,7 @@ export function App() {
                                   ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' 
                                   : 'bg-zinc-800 text-zinc-300 border-zinc-700/60'
                               }`}>
-                                {formatQty(totalStock)} ud. {isLow && (language === 'es' ? '(Stock Bajo)' : language === 'en' ? '(Low Stock)' : '(Scorta Bassa)')}
+                                {formatQty(totalStock)} {p.unit || 'ud'} {isLow && (language === 'es' ? '(Stock Bajo)' : language === 'en' ? '(Low Stock)' : '(Scorta Bassa)')}
                               </span>
                               <p className="text-[11px] font-mono text-zinc-400 mt-1 font-semibold">
                                 {prices.length > 0 ? priceLabel : (language === 'es' ? 'Sin compras' : language === 'en' ? 'No purchases' : 'Nessun acquisto')}
@@ -2614,7 +2630,7 @@ export function App() {
                                   <div key={b.id} className="p-2.5 bg-zinc-900/90 rounded-xl border border-zinc-800/80 flex items-center justify-between text-xs">
                                     <div className="flex items-center gap-3">
                                       <span className="font-mono text-orange-400 font-bold bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20">
-                                        {formatQty(b.qty)} ud.
+                                        {formatQty(b.qty)} {p.unit || 'ud'}
                                       </span>
                                       <div>
                                         <p className="font-semibold text-zinc-200">{b.supplier || 'Taller / Proveedor'}</p>
@@ -2622,7 +2638,7 @@ export function App() {
                                       </div>
                                     </div>
                                     <span className="font-mono font-bold text-zinc-100 bg-zinc-800 px-2.5 py-1 rounded-lg border border-zinc-700">
-                                      {b.pricePerUnit.toFixed(2)} € / ud.
+                                      {b.pricePerUnit.toFixed(2)} € / {p.unit || 'ud'}
                                     </span>
                                   </div>
                                 ))}
@@ -3906,18 +3922,21 @@ export function App() {
 
                           return (
                             <option key={p.id} value={String(p.id)} disabled={totalStock <= 0 && !isCurrentSelected}>
-                              {p.name} (Stock: {totalStock} ud | {unitPrice > 0 ? `${unitPrice.toFixed(2)} €/ud` : 'Sin precio'}) {totalStock <= 0 ? '- ¡AGOTADO!' : ''}
+                              {p.name} (Stock: {totalStock} {p.unit || 'ud'} | {unitPrice > 0 ? `${unitPrice.toFixed(2)} €/${p.unit || 'ud'}` : 'Sin precio'}) {totalStock <= 0 ? '- ¡AGOTADO!' : ''}
                             </option>
                           );
                         })}
                     </select>
                   </div>
                   <div>
-                    <input 
+                    <input
                       type="number"
                       min="0.01"
                       step="0.01"
-                      placeholder="Cant. (1.00)"
+                      placeholder={(() => {
+                        const pObj = parts.find(p => String(p.id) === String(newMaintenanceForm.selectedPartId));
+                        return `Cant. (1.00 ${pObj?.unit || 'ud'})`;
+                      })()}
                       value={newMaintenanceForm.partQty}
                       onChange={(e) => {
                         const qtyStr = e.target.value;
@@ -3926,8 +3945,8 @@ export function App() {
                         const activeBatch = pObj && pObj.purchases ? pObj.purchases.find(b => b.qty > 0) : null;
                         const unitPrice = activeBatch ? activeBatch.pricePerUnit : 0;
                         const calculatedCost = unitPrice > 0 && qtyNum > 0 ? (unitPrice * qtyNum) : 0;
-                        setNewMaintenanceForm({ 
-                          ...newMaintenanceForm, 
+                        setNewMaintenanceForm({
+                          ...newMaintenanceForm,
                           partQty: qtyStr,
                           partsCost: calculatedCost > 0 ? calculatedCost.toFixed(2) : newMaintenanceForm.partsCost
                         });
@@ -4393,15 +4412,29 @@ export function App() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-zinc-400 font-medium mb-1">Stock Mínimo de Alerta</label>
-                <input 
-                  type="number" 
-                  placeholder="1" 
-                  value={newPartForm.minStock}
-                  onChange={(e) => setNewPartForm({ ...newPartForm, minStock: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-mono" 
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-zinc-400 font-medium mb-1">Unidad de Medida</label>
+                  <select
+                    value={newPartForm.unit}
+                    onChange={(e) => setNewPartForm({ ...newPartForm, unit: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-medium"
+                  >
+                    {PART_UNITS.map(u => (
+                      <option key={u.value} value={u.value}>{u.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-zinc-400 font-medium mb-1">Stock Mínimo de Alerta</label>
+                  <input
+                    type="number"
+                    placeholder="1"
+                    value={newPartForm.minStock}
+                    onChange={(e) => setNewPartForm({ ...newPartForm, minStock: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-mono"
+                  />
+                </div>
               </div>
 
               {!editingPartId && (
@@ -4409,14 +4442,15 @@ export function App() {
                   <span className="text-[11px] font-mono text-orange-400 font-bold uppercase tracking-wider block">🧾 Datos de la primera compra / lote inicial</span>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-zinc-400 text-[11px] mb-1">Unidades Compradas</label>
-                      <input 
-                        type="number" 
-                        min="1"
-                        placeholder="1" 
+                      <label className="block text-zinc-400 text-[11px] mb-1">Cantidad Comprada ({newPartForm.unit || 'ud'})</label>
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        placeholder="1"
                         value={newPartForm.initialQty}
                         onChange={(e) => setNewPartForm({ ...newPartForm, initialQty: e.target.value })}
-                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-mono" 
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-mono"
                         required
                       />
                     </div>
@@ -4488,15 +4522,16 @@ export function App() {
             <form onSubmit={handleAddPurchaseBatch} className="space-y-3.5 text-xs">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-zinc-400 font-medium mb-1">Unidades Adquiridas</label>
-                  <input 
-                    type="number" 
-                    min="1"
-                    placeholder="1" 
+                  <label className="block text-zinc-400 font-medium mb-1">Cantidad Adquirida ({showBatchModal.unit || 'ud'})</label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    placeholder="1"
                     value={newBatchForm.qty}
                     onChange={(e) => setNewBatchForm({ ...newBatchForm, qty: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-mono" 
-                    required 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-mono"
+                    required
                   />
                 </div>
                 <div>
