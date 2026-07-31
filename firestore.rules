@@ -54,9 +54,9 @@ service cloud.firestore {
     }
 
     // Reglas para plans (planes de suscripción configurables desde el Backoffice)
-    // Cualquier usuario autenticado puede leerlos (se muestran en Ajustes); solo admins escriben
+    // Lectura pública (se muestran en Ajustes de la app y en los precios de la landing); solo admins escriben
     match /plans/{planId} {
-      allow read: if request.auth != null;
+      allow read: if true;
       allow write: if isAdmin();
     }
   }
