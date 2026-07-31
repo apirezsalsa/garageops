@@ -890,7 +890,9 @@ export function App() {
     icon: '🏍️',
     photo: '',
     usageNum: '',
-    nextInspectionDate: ''
+    nextInspectionDate: '',
+    licensePlate: '',
+    insuranceCompany: ''
   });
 
   const openEditVehicleModal = (v) => {
@@ -902,7 +904,9 @@ export function App() {
       icon: v.icon || '🏍️',
       photo: v.photo || '',
       usageNum: (v.usageNum || 0).toString(),
-      nextInspectionDate: v.nextInspectionDate || ''
+      nextInspectionDate: v.nextInspectionDate || '',
+      licensePlate: v.licensePlate || '',
+      insuranceCompany: v.insuranceCompany || ''
     });
     setShowAddVehicleModal(true);
   };
@@ -920,7 +924,9 @@ export function App() {
         usage: `${newVehicleForm.usageNum || 0} ${newVehicleForm.unit}`,
         usageNum: parseFloat(newVehicleForm.usageNum) || 0,
         unit: newVehicleForm.unit,
-        nextInspectionDate: newVehicleForm.nextInspectionDate || null
+        nextInspectionDate: newVehicleForm.nextInspectionDate || null,
+        licensePlate: newVehicleForm.licensePlate || null,
+        insuranceCompany: newVehicleForm.insuranceCompany || null
       };
 
       await firestoreUpdate('vehicles', editingVehicleId, updatedData);
@@ -931,7 +937,7 @@ export function App() {
 
       setShowAddVehicleModal(false);
       setEditingVehicleId(null);
-      setNewVehicleForm({ name: '', category: 'Mantenimiento por Km', unit: 'km', icon: '🏍️', photo: '', usageNum: '', nextInspectionDate: '' });
+      setNewVehicleForm({ name: '', category: 'Mantenimiento por Km', unit: 'km', icon: '🏍️', photo: '', usageNum: '', nextInspectionDate: '', licensePlate: '', insuranceCompany: '' });
       return;
     }
 
@@ -956,6 +962,8 @@ export function App() {
       usageNum: parseFloat(newVehicleForm.usageNum) || 0,
       unit: newVehicleForm.unit,
       nextInspectionDate: newVehicleForm.nextInspectionDate || null,
+      licensePlate: newVehicleForm.licensePlate || null,
+      insuranceCompany: newVehicleForm.insuranceCompany || null,
       nextService: `Próximo servicio`,
       status: 'ok',
       statusText: 'Al día',
@@ -965,7 +973,7 @@ export function App() {
 
     await firestoreAdd('vehicles', newVehicle);
     setShowAddVehicleModal(false);
-    setNewVehicleForm({ name: '', category: 'Mantenimiento por Km', unit: 'km', icon: '🏍️', photo: '', usageNum: '', nextInspectionDate: '' });
+    setNewVehicleForm({ name: '', category: 'Mantenimiento por Km', unit: 'km', icon: '🏍️', photo: '', usageNum: '', nextInspectionDate: '', licensePlate: '', insuranceCompany: '' });
   };
 
   const handleUpdateKm = async (e) => {
@@ -2139,7 +2147,12 @@ export function App() {
                   <div className="min-w-0 flex-1">
                     <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight truncate">{selectedVehicle.name}</h2>
                     <p className="text-[11px] sm:text-xs text-zinc-400 font-medium mt-0.5 truncate">{translateCategory(selectedVehicle.category, language)}</p>
-                    
+                    {(selectedVehicle.licensePlate || selectedVehicle.insuranceCompany) && (
+                      <p className="text-[11px] text-zinc-500 font-mono mt-0.5 truncate">
+                        {[selectedVehicle.licensePlate, selectedVehicle.insuranceCompany].filter(Boolean).join(' · ')}
+                      </p>
+                    )}
+
                     <div className="flex flex-wrap items-center gap-1.5 mt-2">
                       <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-zinc-950/80 border border-zinc-800 text-orange-400 font-mono text-[11px] font-semibold">
                         <Gauge className="w-3 h-3" />
@@ -4086,6 +4099,33 @@ export function App() {
                     ? 'Déjalo en blanco si no aplica en tu país o vehículo.'
                     : 'Leave it blank if this does not apply in your country or vehicle.'}
                 </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-zinc-400 font-medium mb-1">
+                    {language === 'es' ? 'Matrícula (Opcional)' : 'License Plate (Optional)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={newVehicleForm.licensePlate}
+                    onChange={(e) => setNewVehicleForm({ ...newVehicleForm, licensePlate: e.target.value.toUpperCase() })}
+                    placeholder="1234 ABC"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-mono uppercase"
+                  />
+                </div>
+                <div>
+                  <label className="block text-zinc-400 font-medium mb-1">
+                    {language === 'es' ? 'Aseguradora (Opcional)' : 'Insurance Company (Optional)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={newVehicleForm.insuranceCompany}
+                    onChange={(e) => setNewVehicleForm({ ...newVehicleForm, insuranceCompany: e.target.value })}
+                    placeholder={language === 'es' ? 'Ej. Mapfre' : 'e.g. Allstate'}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500"
+                  />
+                </div>
               </div>
 
               <div>
