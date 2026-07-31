@@ -1047,6 +1047,7 @@ export function App() {
 
   const [newPartForm, setNewPartForm] = useState({
     name: '',
+    reference: '',
     compatibleVehicles: [],
     minStock: '1',
     initialQty: '1',
@@ -1071,6 +1072,7 @@ export function App() {
     if (editingPartId) {
       await firestoreUpdate('parts', editingPartId, {
         name: newPartForm.name,
+        reference: newPartForm.reference || null,
         compatibleVehicles: newPartForm.compatibleVehicles.length > 0 ? newPartForm.compatibleVehicles : ['Universal'],
         minStock: minStockNum
       });
@@ -1088,6 +1090,7 @@ export function App() {
 
       const newPart = {
         name: newPartForm.name,
+        reference: newPartForm.reference || null,
         compatibleVehicles: newPartForm.compatibleVehicles.length > 0 ? newPartForm.compatibleVehicles : ['Universal'],
         minStock: minStockNum,
         purchases: initialPurchase
@@ -1100,6 +1103,7 @@ export function App() {
     setEditingPartId(null);
     setNewPartForm({
       name: '',
+      reference: '',
       compatibleVehicles: [],
       minStock: '1',
       initialQty: '1',
@@ -1138,6 +1142,7 @@ export function App() {
     setEditingPartId(p.id);
     setNewPartForm({
       name: p.name,
+      reference: p.reference || '',
       compatibleVehicles: p.compatibleVehicles || (p.vehicle ? [p.vehicle] : ['Universal']),
       minStock: String(p.minStock || 1),
       initialQty: '0',
@@ -2458,10 +2463,13 @@ export function App() {
                   setEditingPartId(null);
                   setNewPartForm({
                     name: '',
-                    vehicle: vehicles[0]?.name || 'Universal',
-                    stock: '1',
+                    reference: '',
+                    compatibleVehicles: [],
                     minStock: '1',
-                    price: ''
+                    initialQty: '1',
+                    initialPrice: '',
+                    initialSupplier: '',
+                    initialDate: '2026-07-25'
                   });
                   setShowAddPartModal(true);
                 }}
@@ -2518,6 +2526,11 @@ export function App() {
                           <div>
                             <div className="flex items-center gap-2">
                               <p className="text-xs sm:text-sm font-bold text-zinc-100">{p.name}</p>
+                              {p.reference && (
+                                <span className="text-[10px] font-mono bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-lg border border-zinc-700/60">
+                                  {p.reference}
+                                </span>
+                              )}
                               {purchases.length > 1 && (
                                 <span className="text-[10px] font-mono bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2 py-0.5 rounded-full font-bold">
                                   {purchases.length} {language === 'es' ? 'Lotes de Compra' : language === 'en' ? 'Purchase Batches' : 'Lotti d\'acquisto'}
@@ -4315,8 +4328,19 @@ export function App() {
                   placeholder="Ej: Aceite Motorex 10W50, Filtro de Aire" 
                   value={newPartForm.name}
                   onChange={(e) => setNewPartForm({ ...newPartForm, name: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-medium placeholder:text-zinc-600" 
-                  required 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-medium placeholder:text-zinc-600"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-zinc-400 font-medium mb-1">Referencia (Opcional)</label>
+                <input
+                  type="text"
+                  placeholder="Ej: SKU-12345, REF-OEM-8934"
+                  value={newPartForm.reference}
+                  onChange={(e) => setNewPartForm({ ...newPartForm, reference: e.target.value })}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-mono placeholder:text-zinc-600"
                 />
               </div>
 
