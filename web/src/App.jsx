@@ -137,6 +137,32 @@ const computeNextRenewal = (startMs, billingCycle, now = Date.now()) => {
   return renewal;
 };
 
+// Etiqueta de la inspección técnica obligatoria según idioma (varía mucho por país: ITV en España,
+// MOT en Reino Unido, TÜV en Alemania, y en EEUU depende de cada estado, por eso el término genérico en inglés)
+const INSPECTION_LABELS = {
+  es: 'ITV',
+  en: 'Vehicle Inspection',
+  it: 'Revisione',
+  fr: 'Contrôle Technique',
+  de: 'TÜV',
+  pt: 'Inspeção Veicular'
+};
+const getInspectionLabel = (language) => INSPECTION_LABELS[language] || INSPECTION_LABELS.es;
+
+// Días restantes (negativo si ya venció) hasta la fecha de inspección obligatoria del vehículo
+const getInspectionStatus = (dateStr) => {
+  if (!dateStr) return null;
+  const target = new Date(dateStr);
+  if (isNaN(target.getTime())) return null;
+  const msPerDay = 1000 * 60 * 60 * 24;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  target.setHours(0, 0, 0, 0);
+  const days = Math.round((target.getTime() - today.getTime()) / msPerDay);
+  const urgency = days < 0 ? 'overdue' : days <= 30 ? 'soon' : 'ok';
+  return { days, urgency };
+};
+
 // Función para procesar, recortar al centro en cuadrado (1:1) y optimizar fotos del usuario
 const optimizeImageFile = (file) => {
   return new Promise((resolve) => {
@@ -863,7 +889,8 @@ export function App() {
     unit: 'km',
     icon: '🏍️',
     photo: '',
-    usageNum: ''
+    usageNum: '',
+    nextInspectionDate: ''
   });
 
   const openEditVehicleModal = (v) => {
@@ -874,7 +901,8 @@ export function App() {
       unit: v.unit || 'km',
       icon: v.icon || '🏍️',
       photo: v.photo || '',
-      usageNum: (v.usageNum || 0).toString()
+      usageNum: (v.usageNum || 0).toString(),
+      nextInspectionDate: v.nextInspectionDate || ''
     });
     setShowAddVehicleModal(true);
   };
@@ -891,18 +919,19 @@ export function App() {
         photo: newVehicleForm.photo || null,
         usage: `${newVehicleForm.usageNum || 0} ${newVehicleForm.unit}`,
         usageNum: parseFloat(newVehicleForm.usageNum) || 0,
-        unit: newVehicleForm.unit
+        unit: newVehicleForm.unit,
+        nextInspectionDate: newVehicleForm.nextInspectionDate || null
       };
 
       await firestoreUpdate('vehicles', editingVehicleId, updatedData);
-      
+
       if (selectedVehicle?.id === editingVehicleId) {
         setSelectedVehicle(prev => ({ ...prev, ...updatedData }));
       }
 
       setShowAddVehicleModal(false);
       setEditingVehicleId(null);
-      setNewVehicleForm({ name: '', category: 'Mantenimiento por Km', unit: 'km', icon: '🏍️', photo: '', usageNum: '' });
+      setNewVehicleForm({ name: '', category: 'Mantenimiento por Km', unit: 'km', icon: '🏍️', photo: '', usageNum: '', nextInspectionDate: '' });
       return;
     }
 
@@ -926,6 +955,7 @@ export function App() {
       usage: `${newVehicleForm.usageNum || 0} ${newVehicleForm.unit}`,
       usageNum: parseFloat(newVehicleForm.usageNum) || 0,
       unit: newVehicleForm.unit,
+      nextInspectionDate: newVehicleForm.nextInspectionDate || null,
       nextService: `Próximo servicio`,
       status: 'ok',
       statusText: 'Al día',
@@ -935,7 +965,7 @@ export function App() {
 
     await firestoreAdd('vehicles', newVehicle);
     setShowAddVehicleModal(false);
-    setNewVehicleForm({ name: '', category: 'Mantenimiento por Km', unit: 'km', icon: '🏍️', photo: '', usageNum: '' });
+    setNewVehicleForm({ name: '', category: 'Mantenimiento por Km', unit: 'km', icon: '🏍️', photo: '', usageNum: '', nextInspectionDate: '' });
   };
 
   const handleUpdateKm = async (e) => {
@@ -1276,7 +1306,7 @@ export function App() {
       </head>
       <body>
         <div class="header">
-          <div class="logo">GarageOps — Libro Digital de Servicio</div>
+          <div class="logo">MyGarageOps — Libro Digital de Servicio</div>
           <div class="badge">DOCUMENTO OFICIAL VERIFICADO</div>
         </div>
         <div class="veh-info">
@@ -1312,7 +1342,7 @@ export function App() {
           </tbody>
         </table>
         <div class="footer">
-          Generado automáticamente por GarageOps • Mobile First Vehicle Maintenance System
+          Generado automáticamente por MyGarageOps • Mobile First Vehicle Maintenance System
         </div>
         <script>
           window.onload = function() { window.print(); };
@@ -1386,7 +1416,7 @@ export function App() {
         } catch (err) {
           setNoticeModal({
             title: 'Error de Importación',
-            message: 'Error al importar archivo. Asegúrate de seleccionar un JSON válido generado por GarageOps.',
+            message: 'Error al importar archivo. Asegúrate de seleccionar un JSON válido generado por MyGarageOps.',
             type: 'error'
           });
         }
@@ -1426,7 +1456,7 @@ export function App() {
       <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
-          <span className="text-xs font-mono text-zinc-400">Cargando GarageOps...</span>
+          <span className="text-xs font-mono text-zinc-400">Cargando MyGarageOps...</span>
         </div>
       </div>
     );
@@ -1439,10 +1469,10 @@ export function App() {
           {/* Logo & Marca */}
           <div className="text-center space-y-3">
             <div className="w-16 h-16 rounded-2xl bg-zinc-900 overflow-hidden border-2 border-orange-500/40 flex items-center justify-center mx-auto shadow-2xl shadow-orange-500/20">
-              <img src="/logo.png" alt="GarageOps Logo" className="w-full h-full object-cover scale-110" />
+              <img src="/logo.png" alt="MyGarageOps Logo" className="w-full h-full object-cover scale-110" />
             </div>
             <div>
-              <h1 className="text-2xl font-black text-white tracking-tight">GarageOps</h1>
+              <h1 className="text-2xl font-black text-white tracking-tight">MyGarageOps</h1>
               <p className="text-xs text-zinc-400 mt-1">
                 {language === 'es' ? 'Gestión inteligente de vehículos, repuestos y mantenimientos' : 'Smart management of vehicles, parts and maintenance'}
               </p>
@@ -1540,7 +1570,7 @@ export function App() {
                 className="w-full py-3.5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm transition-all shadow-lg shadow-orange-500/25 active:scale-95 mt-2"
               >
                 {isRegisterMode 
-                  ? (language === 'es' ? 'Registrarse en GarageOps' : 'Register in GarageOps') 
+                  ? (language === 'es' ? 'Registrarse en MyGarageOps' : 'Register in MyGarageOps') 
                   : (language === 'es' ? 'Entrar a Mi Garaje' : 'Access My Garage')}
               </button>
             </form>
@@ -1611,10 +1641,10 @@ export function App() {
           {/* Header & Logo */}
           <div className="flex items-center gap-3 px-2 py-3 mb-8">
             <div className="w-10 h-10 rounded-xl bg-zinc-900 overflow-hidden border border-orange-500/30 flex items-center justify-center shadow-lg shadow-orange-500/20 shrink-0">
-              <img src="/logo.png" alt="GarageOps Logo" className="w-full h-full object-cover scale-110" />
+              <img src="/logo.png" alt="MyGarageOps Logo" className="w-full h-full object-cover scale-110" />
             </div>
             <div>
-              <h1 className="font-bold text-lg leading-tight tracking-tight text-white">GarageOps</h1>
+              <h1 className="font-bold text-lg leading-tight tracking-tight text-white">MyGarageOps</h1>
               <span className="text-[10px] font-mono tracking-wider text-orange-400 font-semibold bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20">
                 {language === 'es' ? 'Gestión de Garaje' : language === 'en' ? 'Garage Management' : 'Gestione Garage'}
               </span>
@@ -1705,10 +1735,10 @@ export function App() {
         <header className="flex md:hidden items-center justify-between pb-4 mb-5 border-b border-zinc-900">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-zinc-900 overflow-hidden border border-orange-500/30 flex items-center justify-center shadow-md shadow-orange-500/20 shrink-0">
-              <img src="/logo.png" alt="GarageOps Logo" className="w-full h-full object-cover scale-110" />
+              <img src="/logo.png" alt="MyGarageOps Logo" className="w-full h-full object-cover scale-110" />
             </div>
             <div>
-              <span className="font-bold text-base tracking-tight text-white block leading-none">GarageOps</span>
+              <span className="font-bold text-base tracking-tight text-white block leading-none">MyGarageOps</span>
               <span className="text-[10px] text-zinc-500 font-medium">Panel Móvil</span>
             </div>
           </div>
@@ -2134,6 +2164,22 @@ export function App() {
                       }`}>
                         {selectedVehicle.status === 'ok' ? t('statusOk') : selectedVehicle.statusText}
                       </span>
+                      {(() => {
+                        const inspection = getInspectionStatus(selectedVehicle.nextInspectionDate);
+                        if (!inspection) return null;
+                        return (
+                          <span className={`px-2.5 py-0.5 rounded-lg text-[11px] font-semibold border ${
+                            inspection.urgency === 'overdue' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' :
+                            inspection.urgency === 'soon' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
+                            'bg-zinc-800/60 text-zinc-400 border-zinc-700/60'
+                          }`}>
+                            {getInspectionLabel(language)}:{' '}
+                            {inspection.days < 0
+                              ? (language === 'es' ? `venció hace ${Math.abs(inspection.days)} días` : language === 'en' ? `overdue by ${Math.abs(inspection.days)} days` : `scaduta da ${Math.abs(inspection.days)} giorni`)
+                              : (language === 'es' ? `en ${inspection.days} días` : language === 'en' ? `in ${inspection.days} days` : `tra ${inspection.days} giorni`)}
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -4026,6 +4072,23 @@ export function App() {
               </div>
 
               <div>
+                <label className="block text-zinc-400 font-medium mb-1">
+                  {language === 'es' ? `Próxima ${getInspectionLabel(language)} (Opcional)` : `Next ${getInspectionLabel(language)} (Optional)`}
+                </label>
+                <input
+                  type="date"
+                  value={newVehicleForm.nextInspectionDate}
+                  onChange={(e) => setNewVehicleForm({ ...newVehicleForm, nextInspectionDate: e.target.value })}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-mono"
+                />
+                <p className="text-[10px] text-zinc-500 mt-1">
+                  {language === 'es'
+                    ? 'Déjalo en blanco si no aplica en tu país o vehículo.'
+                    : 'Leave it blank if this does not apply in your country or vehicle.'}
+                </p>
+              </div>
+
+              <div>
                 <label className="block text-zinc-400 font-medium mb-1">Icono Representativo</label>
                 <div className="flex items-center gap-2">
                   {['🏍️', '🌍', '🛻', '🏎️', '🚜', '🚐'].map(icon => (
@@ -4729,9 +4792,11 @@ function VehicleBentoCard({ vehicle, maintenances = [], language = 'es', onSelec
     .filter(m => (m.vehicle || '').toLowerCase() === (vehicle.name || '').toLowerCase())
     .reduce((sum, m) => sum + (parseFloat((m.cost || '').replace(/[^0-9.]/g, '')) || 0), 0);
 
-  const statusLabel = vehicle.status === 'ok' 
+  const statusLabel = vehicle.status === 'ok'
     ? (TRANSLATIONS[language]?.statusOk || TRANSLATIONS.es.statusOk)
     : vehicle.statusText;
+
+  const inspection = getInspectionStatus(vehicle.nextInspectionDate);
 
   return (
     <div 
@@ -4790,6 +4855,22 @@ function VehicleBentoCard({ vehicle, maintenances = [], language = 'es', onSelec
           {statusLabel}
         </span>
       </div>
+
+      {inspection && (
+        <div className={`mt-2 flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[10px] font-semibold ${
+          inspection.urgency === 'overdue' ? 'bg-rose-500/10 text-rose-300 border-rose-500/30' :
+          inspection.urgency === 'soon' ? 'bg-amber-500/10 text-amber-300 border-amber-500/30' :
+          'bg-zinc-800/60 text-zinc-400 border-zinc-700/60'
+        }`}>
+          <ShieldAlert className="w-3 h-3 shrink-0" />
+          <span>
+            {getInspectionLabel(language)}:{' '}
+            {inspection.days < 0
+              ? (language === 'es' ? `venció hace ${Math.abs(inspection.days)} días` : language === 'en' ? `overdue by ${Math.abs(inspection.days)} days` : `scaduta da ${Math.abs(inspection.days)} giorni`)
+              : (language === 'es' ? `en ${inspection.days} días` : language === 'en' ? `in ${inspection.days} days` : `tra ${inspection.days} giorni`)}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
