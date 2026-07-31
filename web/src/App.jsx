@@ -385,6 +385,7 @@ export function App() {
     const active = draft.active !== false;
     const data = {
       name: draft.name.trim(),
+      tagline: (draft.tagline || '').trim(),
       priceMonthly: Number(draft.priceMonthly) || 0,
       priceAnnual: Number(draft.priceAnnual) || 0,
       maxVehicles: draft.unlimited ? -1 : (Number(draft.maxVehicles) || 0),
@@ -3253,7 +3254,7 @@ export function App() {
                   </div>
                   <button
                     onClick={() => setEditingPlan({
-                      name: '', priceMonthly: 0, priceAnnual: 0, maxVehicles: 2, unlimited: false,
+                      name: '', tagline: '', priceMonthly: 0, priceAnnual: 0, maxVehicles: 2, unlimited: false,
                       badgeColor: 'zinc', highlight: false, featuresText: '', isDefaultSignup: false, active: true
                     })}
                     className="px-3.5 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold transition-all flex items-center gap-1.5 shrink-0"
@@ -4596,6 +4597,17 @@ export function App() {
                   onChange={(e) => setEditingPlan(prev => ({ ...prev, name: e.target.value }))}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-medium"
                   placeholder="Ej: DIY Garage"
+                />
+              </div>
+
+              <div>
+                <label className="block text-zinc-400 font-medium mb-1">Frase descriptiva (debajo del nombre)</label>
+                <input
+                  type="text"
+                  value={editingPlan.tagline || ''}
+                  onChange={(e) => setEditingPlan(prev => ({ ...prev, tagline: e.target.value }))}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500"
+                  placeholder="Ej: Perfecto para empezar con tu primer vehículo"
                 />
               </div>
 
