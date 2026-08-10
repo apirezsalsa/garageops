@@ -69,6 +69,10 @@ export const PLAN_COLOR_STYLES = {
 const DEFAULT_PLAN_COLOR = 'zinc';
 
 // Planes de siembra inicial (se escriben una sola vez en Firestore si la colección 'plans' está vacía)
+// Mientras no haya pasarela de pago real integrada, los usuarios no pueden autoasignarse un plan de pago:
+// solo pueden quedarse en un plan gratuito o pedir a un admin que se lo otorgue desde el Backoffice.
+const PAYMENT_GATEWAY_ENABLED = false;
+
 const SEED_PLANS = [
   {
     id: 'starter',
@@ -79,7 +83,7 @@ const SEED_PLANS = [
     badgeColor: 'zinc',
     highlight: false,
     features: ['Historial de mantenimiento básico', 'Soporte por comunidad'],
-    isDefaultSignup: false,
+    isDefaultSignup: true,
     active: true,
     order: 0
   },
@@ -92,7 +96,7 @@ const SEED_PLANS = [
     badgeColor: 'orange',
     highlight: true,
     features: ['Alertas de mantenimiento', 'Gestión de repuestos', 'Soporte prioritario'],
-    isDefaultSignup: true,
+    isDefaultSignup: false,
     active: true,
     order: 1
   },
@@ -209,7 +213,7 @@ export function App() {
 
   // Referencia mutable al plan por defecto vigente (se sincroniza más abajo, una vez cargados los planes),
   // para poder leer siempre su valor más reciente dentro del callback de auth sin resuscribir el listener.
-  const defaultPlanIdRef = useRef('pro');
+  const defaultPlanIdRef = useRef('starter');
 
   // Listener de sesión Firebase
   useEffect(() => {
@@ -288,7 +292,7 @@ export function App() {
   // Planes de suscripción configurables desde el Backoffice (Firestore: colección 'plans')
   const [plans, setPlans] = useState([]);
   const plansById = useMemo(() => Object.fromEntries(plans.map(p => [p.id, p])), [plans]);
-  const defaultPlanId = useMemo(() => plans.find(p => p.isDefaultSignup && p.active !== false)?.id || 'pro', [plans]);
+  const defaultPlanId = useMemo(() => plans.find(p => p.isDefaultSignup && p.active !== false)?.id || 'starter', [plans]);
   useEffect(() => { defaultPlanIdRef.current = defaultPlanId; }, [defaultPlanId]);
 
   // Listener global de planes + siembra inicial (una sola vez, hecha por el SuperAdmin si la colección está vacía)
@@ -318,6 +322,7 @@ export function App() {
   const [allUsersList, setAllUsersList] = useState([]);
   const [vehicleCountsByUser, setVehicleCountsByUser] = useState({}); // { uid: count }
   const [adminUserSearch, setAdminUserSearch] = useState('');
+  const [adminUserSort, setAdminUserSort] = useState('alpha');
   const [selectedAdminUser, setSelectedAdminUser] = useState(null); // usuario seleccionado para gestionar en modal
   const [adminSubTab, setAdminSubTab] = useState('users'); // 'users' | 'plans' — sub-pestaña del Backoffice
   const [editingPlan, setEditingPlan] = useState(null); // plan siendo creado/editado en el modal de Planes ({} para crear uno nuevo)
@@ -721,7 +726,7 @@ export function App() {
   // Estado de Plan Activo y Frecuencia de Facturación
   const activeUserPlan = (userProfile?.role === 'admin' || userEmail?.toLowerCase() === 'apirezsalsa@gmail.com') 
     ? 'unlimited' 
-    : (userProfile?.plan || localStorage.getItem('garageops_plan') || 'pro');
+    : (userProfile?.plan || localStorage.getItem('garageops_plan') || 'starter');
 
   const [currentPlan, setCurrentPlan] = useState(activeUserPlan);
 
@@ -774,6 +779,19 @@ export function App() {
   // Programa un cambio de plan y/o ciclo de facturación para la próxima renovación (nunca inmediato, nunca con devolución/prorrateo)
   const handlePlanSelection = async (targetPlanId, targetBillingCycle) => {
     if (!firebaseUser) return;
+    const targetPlanDef = plansById[targetPlanId];
+    if (!PAYMENT_GATEWAY_ENABLED && (targetPlanDef?.priceMonthly || 0) > 0) {
+      setNoticeModal({
+        title: language === 'es' ? 'Mejora de Plan Aún No Disponible' : language === 'en' ? 'Plan Upgrade Not Available Yet' : 'Aggiornamento Piano Non Disponibile',
+        message: language === 'es'
+          ? `Todavía no tenemos activada la pasarela de pago. Escríbenos a soporte y te activaremos manualmente el plan ${targetPlanDef?.name || targetPlanId}.`
+          : language === 'en'
+            ? `Our payment gateway isn't live yet. Contact support and we'll manually activate the ${targetPlanDef?.name || targetPlanId} plan for you.`
+            : `Il nostro gateway di pagamento non è ancora attivo. Contatta il supporto per attivare manualmente il piano ${targetPlanDef?.name || targetPlanId}.`,
+        type: 'info'
+      });
+      return;
+    }
     const userDocRef = doc(db, 'users', firebaseUser.uid);
     try {
       await updateDoc(userDocRef, {
@@ -2910,6 +2928,7 @@ export function App() {
                   const isDiscontinued = plan.active === false;
                   const price = billingCycle === 'monthly' ? plan.priceMonthly : plan.priceAnnual;
                   const planMaxVeh = plan.maxVehicles === -1 ? '∞' : plan.maxVehicles;
+                  const isPaidLocked = !PAYMENT_GATEWAY_ENABLED && !isCurrent && (plan.priceMonthly || 0) > 0;
                   return (
                     <div key={plan.id} className={`p-4 rounded-2xl border flex flex-col justify-between space-y-4 transition-all relative ${
                       isCurrent
@@ -2963,14 +2982,18 @@ export function App() {
                             ? 'bg-zinc-800 text-zinc-400 cursor-default'
                             : isDiscontinued
                               ? 'bg-zinc-900 text-zinc-600 cursor-not-allowed'
-                              : 'bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-500/25'
+                              : isPaidLocked
+                                ? 'bg-zinc-900 border border-zinc-700 text-zinc-400 hover:text-white hover:border-orange-500/40'
+                                : 'bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-500/25'
                         }`}
                       >
                         {isCurrent
                           ? (language === 'es' ? 'Plan Actual' : language === 'en' ? 'Current Plan' : 'Piano Attuale')
                           : isPendingTarget
                             ? (language === 'es' ? 'Programado' : language === 'en' ? 'Scheduled' : 'Pianificato')
-                            : (language === 'es' ? `Seleccionar ${plan.name}` : language === 'en' ? `Select ${plan.name}` : `Seleziona ${plan.name}`)}
+                            : isPaidLocked
+                              ? (language === 'es' ? '🔒 Solicitar a Soporte' : language === 'en' ? '🔒 Request from Support' : '🔒 Richiedi al Supporto')
+                              : (language === 'es' ? `Seleccionar ${plan.name}` : language === 'en' ? `Select ${plan.name}` : `Seleziona ${plan.name}`)}
                       </button>
                     </div>
                   );
@@ -3066,6 +3089,8 @@ export function App() {
           const totalVehicles = Object.values(vehicleCountsByUser).reduce((a, b) => a + b, 0);
           const avgVehicles = allUsersList.length > 0 ? (totalVehicles / allUsersList.length).toFixed(1) : 0;
           const paidUsers = allUsersList.filter(u => u.role !== 'admin' && (plansById[u.plan]?.priceMonthly > 0)).length;
+          const freeUsers = allUsersList.filter(u => u.role !== 'admin' && !(plansById[u.plan]?.priceMonthly > 0)).length;
+          const adminUsersCount = allUsersList.filter(u => u.role === 'admin').length;
           const conversionRate = allUsersList.length > 0 ? Math.round((paidUsers / allUsersList.length) * 100) : 0;
           const mrr = allUsersList.reduce((sum, u) => {
             if (u.role === 'admin') return sum;
@@ -3120,7 +3145,7 @@ export function App() {
                   <Users className="w-4 h-4 text-blue-400" />
                 </div>
                 <p className="text-2xl font-black text-white font-mono">{allUsersList.length}</p>
-                <span className="text-[10px] text-zinc-500 font-mono">{paidUsers} de pago · {allUsersList.length - paidUsers} free</span>
+                <span className="text-[10px] text-zinc-500 font-mono">{paidUsers} de pago · {freeUsers} free{adminUsersCount > 0 ? ` · ${adminUsersCount} admin` : ''}</span>
               </div>
 
               <div className="bg-zinc-900/80 p-4 rounded-3xl border border-zinc-800 space-y-1">
@@ -3182,21 +3207,37 @@ export function App() {
                   </h3>
                   <p className="text-xs text-zinc-400 mt-0.5">Haz clic en un usuario para gestionar su cuenta.</p>
                 </div>
-                <div className="relative w-full sm:w-64">
-                  <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    placeholder="Buscar por email..."
-                    value={adminUserSearch}
-                    onChange={(e) => setAdminUserSearch(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-zinc-200 outline-none focus:border-orange-500"
-                  />
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <div className="relative flex-1 sm:w-64">
+                    <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por email..."
+                      value={adminUserSearch}
+                      onChange={(e) => setAdminUserSearch(e.target.value)}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-zinc-200 outline-none focus:border-orange-500"
+                    />
+                  </div>
+                  <select
+                    value={adminUserSort}
+                    onChange={(e) => setAdminUserSort(e.target.value)}
+                    className="bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-1.5 text-xs text-zinc-200 outline-none focus:border-orange-500 shrink-0"
+                  >
+                    <option value="alpha">A-Z</option>
+                    <option value="registered">Fecha de alta</option>
+                    <option value="lastLogin">Última conexión</option>
+                  </select>
                 </div>
               </div>
 
               <div className="space-y-1.5">
                 {allUsersList
                   .filter(u => u.email.toLowerCase().includes(adminUserSearch.toLowerCase()))
+                  .sort((a, b) => {
+                    if (adminUserSort === 'registered') return (b.registered?.getTime() || 0) - (a.registered?.getTime() || 0);
+                    if (adminUserSort === 'lastLogin') return (b.lastLogin?.getTime() || 0) - (a.lastLogin?.getTime() || 0);
+                    return a.email.localeCompare(b.email);
+                  })
                   .map((u) => {
                     const vehCount = vehicleCountsByUser[u.id] || 0;
                     return (
