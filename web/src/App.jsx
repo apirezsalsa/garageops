@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { auth, db } from './firebase';
+import { auth, db, functions } from './firebase';
+import { httpsCallable } from 'firebase/functions';
 import { 
   onAuthStateChanged, 
   createUserWithEmailAndPassword,
@@ -22,6 +23,7 @@ import {
   query,
   where,
   orderBy,
+  limit,
   serverTimestamp,
   Timestamp
 } from 'firebase/firestore';
@@ -52,7 +54,11 @@ import {
   Shield,
   Users,
   BarChart3,
-  Lock
+  Lock,
+  HelpCircle,
+  X,
+  ArrowLeft,
+  ArrowRight
 } from 'lucide-react';
 import { TRANSLATIONS, translateCategory } from './locales';
 
@@ -68,11 +74,30 @@ export const PLAN_COLOR_STYLES = {
 };
 const DEFAULT_PLAN_COLOR = 'zinc';
 
-// Planes de siembra inicial (se escriben una sola vez en Firestore si la colección 'plans' está vacía)
+// Idiomas soportados para los campos traducibles de un plan (tagline y features)
+const PLAN_LANGUAGES = ['es', 'en', 'it', 'fr', 'de', 'pt'];
+
+// Devuelve el texto de un campo multi-idioma de un plan (p.ej. tagline) para el idioma dado.
+// Compatibilidad hacia atrás: los planes creados antes de soportar 6 idiomas guardan tagline como
+// un string suelto en vez de un objeto {es, en, it, fr, de, pt} — en ese caso se usa tal cual, sea cual sea el idioma.
+const getLocalizedPlanText = (value, language) => {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  return value[language] || value.es || Object.values(value).find(Boolean) || '';
+};
+
+// Igual que getLocalizedPlanText pero para arrays (features de un plan)
+const getLocalizedPlanList = (value, language) => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  return value[language] || value.es || Object.values(value).find(v => Array.isArray(v) && v.length) || [];
+};
+
 // Mientras no haya pasarela de pago real integrada, los usuarios no pueden autoasignarse un plan de pago:
 // solo pueden quedarse en un plan gratuito o pedir a un admin que se lo otorgue desde el Backoffice.
 const PAYMENT_GATEWAY_ENABLED = false;
 
+// Planes de siembra inicial (se escriben una sola vez en Firestore si la colección 'plans' está vacía)
 const SEED_PLANS = [
   {
     id: 'starter',
@@ -82,7 +107,18 @@ const SEED_PLANS = [
     maxVehicles: 2,
     badgeColor: 'zinc',
     highlight: false,
-    features: ['Historial de mantenimiento básico', 'Soporte por comunidad'],
+    tagline: {
+      es: 'Para tu vehículo principal', en: 'For your main vehicle', it: 'Per il tuo veicolo principale',
+      fr: 'Pour votre véhicule principal', de: 'Für dein Hauptfahrzeug', pt: 'Para o teu veículo principal'
+    },
+    features: {
+      es: ['Historial de mantenimiento básico', 'Soporte por comunidad'],
+      en: ['Basic maintenance history', 'Community support'],
+      it: ['Cronologia di manutenzione base', 'Supporto della community'],
+      fr: ["Historique d'entretien basique", 'Support communautaire'],
+      de: ['Einfache Wartungshistorie', 'Community-Support'],
+      pt: ['Histórico de manutenção básico', 'Suporte da comunidade']
+    },
     isDefaultSignup: true,
     active: true,
     order: 0
@@ -95,7 +131,18 @@ const SEED_PLANS = [
     maxVehicles: 4,
     badgeColor: 'orange',
     highlight: true,
-    features: ['Alertas de mantenimiento', 'Gestión de repuestos', 'Soporte prioritario'],
+    tagline: {
+      es: 'Particulares con 2 a 4 vehículos', en: 'For 2 to 4 vehicles', it: 'Per privati con 2-4 veicoli',
+      fr: 'Pour les particuliers avec 2 à 4 véhicules', de: 'Für Privatpersonen mit 2 bis 4 Fahrzeugen', pt: 'Para particulares com 2 a 4 veículos'
+    },
+    features: {
+      es: ['Alertas de mantenimiento', 'Gestión de repuestos', 'Soporte prioritario'],
+      en: ['Maintenance alerts', 'Parts management', 'Priority support'],
+      it: ['Avvisi di manutenzione', 'Gestione ricambi', 'Supporto prioritario'],
+      fr: ["Alertes d'entretien", 'Gestion des pièces', 'Support prioritaire'],
+      de: ['Wartungserinnerungen', 'Ersatzteilverwaltung', 'Prioritäts-Support'],
+      pt: ['Alertas de manutenção', 'Gestão de peças', 'Suporte prioritário']
+    },
     isDefaultSignup: false,
     active: true,
     order: 1
@@ -108,7 +155,18 @@ const SEED_PLANS = [
     maxVehicles: -1,
     badgeColor: 'amber',
     highlight: false,
-    features: ['Alertas de mantenimiento', 'Gestión de repuestos', 'Soporte prioritario 24/7'],
+    tagline: {
+      es: 'Sin límites para gran garaje o taller', en: 'No limits, for big garages or shops', it: 'Senza limiti, per grandi garage o officine',
+      fr: 'Sans limites, pour grands garages ou ateliers', de: 'Ohne Limits, für große Garagen oder Werkstätten', pt: 'Sem limites, para grandes garagens ou oficinas'
+    },
+    features: {
+      es: ['Alertas de mantenimiento', 'Gestión de repuestos', 'Soporte prioritario 24/7'],
+      en: ['Maintenance alerts', 'Parts management', '24/7 priority support'],
+      it: ['Avvisi di manutenzione', 'Gestione ricambi', 'Supporto prioritario 24/7'],
+      fr: ["Alertes d'entretien", 'Gestion des pièces', 'Support prioritaire 24/7'],
+      de: ['Wartungserinnerungen', 'Ersatzteilverwaltung', '24/7 Prioritäts-Support'],
+      pt: ['Alertas de manutenção', 'Gestão de peças', 'Suporte prioritário 24/7']
+    },
     isDefaultSignup: false,
     active: true,
     order: 2
@@ -207,6 +265,9 @@ export function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [userEmail, setUserEmail] = useState('');
   const [userProfile, setUserProfile] = useState(null); // Perfil real leído de Firestore
+  // Tour de bienvenida: se muestra solo una vez (marcado en Firestore) y se puede reabrir a mano con el botón de ayuda
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0);
   const [loginForm, setLoginForm] = useState({ email: '', password: '', rememberMe: true });
   const [loginError, setLoginError] = useState('');
   const [isRegisterMode, setIsRegisterMode] = useState(false);
@@ -272,6 +333,22 @@ export function App() {
     return () => unsubscribe();
   }, []);
 
+  // Muestra el tour de bienvenida una sola vez por usuario (se marca en Firestore al terminarlo o saltarlo)
+  useEffect(() => {
+    if (firebaseUser && userProfile && userProfile.hasSeenOnboarding !== true) {
+      setOnboardingStep(0);
+      setShowOnboarding(true);
+    }
+  }, [firebaseUser, userProfile?.hasSeenOnboarding]);
+
+  const closeOnboarding = () => {
+    setShowOnboarding(false);
+    if (firebaseUser) {
+      updateDoc(doc(db, 'users', firebaseUser.uid), { hasSeenOnboarding: true, updatedAt: serverTimestamp() })
+        .catch(err => console.warn('Error al guardar que se vio el tour de bienvenida:', err));
+    }
+  };
+
   // Detectar si el usuario intenta acceder vía backdoor / admin directo (?admin o #admin en la URL)
   const isAdminDirectURL = 
     window.location.hash.toLowerCase() === '#admin' || 
@@ -324,8 +401,12 @@ export function App() {
   const [adminUserSearch, setAdminUserSearch] = useState('');
   const [adminUserSort, setAdminUserSort] = useState('alpha');
   const [selectedAdminUser, setSelectedAdminUser] = useState(null); // usuario seleccionado para gestionar en modal
-  const [adminSubTab, setAdminSubTab] = useState('users'); // 'users' | 'plans' — sub-pestaña del Backoffice
+  const [adminSubTab, setAdminSubTab] = useState('users'); // 'users' | 'plans' | 'transactions' — sub-pestaña del Backoffice
+  const [transactions, setTransactions] = useState([]);
+  const [transactionSearch, setTransactionSearch] = useState('');
+  const [transactionTypeFilter, setTransactionTypeFilter] = useState('all'); // 'all' | 'alta' | 'modificacion' | 'baja'
   const [editingPlan, setEditingPlan] = useState(null); // plan siendo creado/editado en el modal de Planes ({} para crear uno nuevo)
+  const [planEditLang, setPlanEditLang] = useState('es'); // pestaña de idioma activa en el modal de edición de plan (tagline/features)
   const [giftDaysInput, setGiftDaysInput] = useState('30');
   const [giftPlanInput, setGiftPlanInput] = useState('unlimited');
   const [inspectingUser, setInspectingUser] = useState(null); // usuario siendo inspeccionado en modo soporte
@@ -353,27 +434,29 @@ export function App() {
   };
   const [noticeModal, setNoticeModal] = useState(null); // Modal de notificaciones personalizadas
 
-  // Eliminar usuario definitivamente de Firestore desde el Backoffice
+  // Eliminar usuario definitivamente (Firebase Auth + Firestore + sus datos) desde el Backoffice.
+  // Usa una Cloud Function con Admin SDK porque el cliente no puede borrar cuentas de Auth de otros usuarios
+  // — borrar solo el documento de Firestore dejaba la cuenta viva y el usuario podía volver a entrar.
   const handleDeleteUser = (targetUser) => {
     setConfirmModal({
       title: '¿Eliminar Usuario?',
-      message: `¿Seguro que deseas eliminar a ${targetUser.email}? Se borrará su cuenta y sus datos del sistema.`,
+      message: `¿Seguro que deseas eliminar a ${targetUser.email}? Se borrará su cuenta de acceso y todos sus datos (vehículos, repuestos, mantenimientos) de forma permanente e irreversible.`,
       onConfirm: async () => {
         try {
-          await deleteDoc(doc(db, 'users', targetUser.id));
+          const deleteUserAccountFn = httpsCallable(functions, 'deleteUserAccount');
+          await deleteUserAccountFn({ targetUid: targetUser.id });
           setAllUsersList(prev => prev.filter(u => u.id !== targetUser.id));
           setNoticeModal({
             title: 'Usuario Eliminado',
-            message: `El usuario ${targetUser.email} ha sido eliminado con éxito.`,
+            message: `El usuario ${targetUser.email} ha sido eliminado con éxito, incluyendo su cuenta de acceso y sus datos.`,
             type: 'success'
           });
         } catch (err) {
           console.error('Error al eliminar usuario:', err);
-          setAllUsersList(prev => prev.filter(u => u.id !== targetUser.id));
           setNoticeModal({
-            title: 'Usuario Eliminado',
-            message: `Usuario ${targetUser.email} eliminado del panel.`,
-            type: 'success'
+            title: 'Error al Eliminar',
+            message: `No se pudo eliminar a ${targetUser.email}: ${err.message || 'error desconocido'}.`,
+            type: 'warning'
           });
         }
       }
@@ -388,15 +471,23 @@ export function App() {
       return;
     }
     const active = draft.active !== false;
+    const tagline = {};
+    const features = {};
+    for (const lang of PLAN_LANGUAGES) {
+      tagline[lang] = (draft.taglineByLang?.[lang] || '').trim();
+      features[lang] = (draft.featuresTextByLang?.[lang] || '').split('\n').map(f => f.trim()).filter(Boolean);
+    }
     const data = {
       name: draft.name.trim(),
-      tagline: (draft.tagline || '').trim(),
+      tagline,
       priceMonthly: Number(draft.priceMonthly) || 0,
       priceAnnual: Number(draft.priceAnnual) || 0,
+      stripePriceIdMonthly: (draft.stripePriceIdMonthly || '').trim(),
+      stripePriceIdAnnual: (draft.stripePriceIdAnnual || '').trim(),
       maxVehicles: draft.unlimited ? -1 : (Number(draft.maxVehicles) || 0),
       badgeColor: draft.badgeColor || DEFAULT_PLAN_COLOR,
       highlight: !!draft.highlight,
-      features: (draft.featuresText || '').split('\n').map(f => f.trim()).filter(Boolean),
+      features,
       active,
       // Un plan descontinuado no puede quedar marcado como plan por defecto para nuevos registros
       isDefaultSignup: active && !!draft.isDefaultSignup,
@@ -463,7 +554,7 @@ export function App() {
       await signInWithPopup(auth, new GoogleAuthProvider());
     } catch (err) {
       if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
-        setLoginError(language === 'es' ? 'No se pudo iniciar sesión con Google' : 'Could not sign in with Google');
+        setLoginError(language === 'es' ? 'No se pudo iniciar sesión con Google' : language === 'en' ? 'Could not sign in with Google' : language === 'it' ? 'Impossibile accedere con Google' : language === 'fr' ? 'Impossible de se connecter avec Google' : language === 'de' ? 'Anmeldung mit Google fehlgeschlagen' : 'Não foi possível iniciar sessão com o Google');
       }
     }
   };
@@ -474,7 +565,7 @@ export function App() {
       await signInWithPopup(auth, new OAuthProvider('apple.com'));
     } catch (err) {
       if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
-        setLoginError(language === 'es' ? 'No se pudo iniciar sesión con Apple' : 'Could not sign in with Apple');
+        setLoginError(language === 'es' ? 'No se pudo iniciar sesión con Apple' : language === 'en' ? 'Could not sign in with Apple' : language === 'it' ? 'Impossibile accedere con Apple' : language === 'fr' ? 'Impossible de se connecter avec Apple' : language === 'de' ? 'Anmeldung mit Apple fehlgeschlagen' : 'Não foi possível iniciar sessão com a Apple');
       }
     }
   };
@@ -636,6 +727,32 @@ export function App() {
     return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
   }, [firebaseUser, inspectingUser]);
 
+  // Histórico de transacciones de Stripe (altas, modificaciones y bajas), solo para el Backoffice
+  useEffect(() => {
+    if (!firebaseUser || !isSuperAdmin) return;
+    const transactionsQuery = query(collection(db, 'transactions'), orderBy('createdAt', 'desc'), limit(300));
+    const unsubTransactions = onSnapshot(transactionsQuery, (snap) => {
+      setTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.warn('Firestore transactions listener fallback:', err));
+    return () => unsubTransactions();
+  }, [firebaseUser, isSuperAdmin]);
+
+  // Historial de pagos del propio usuario, para mostrar en "Ajustes & Suscripción"
+  const [myTransactions, setMyTransactions] = useState([]);
+  useEffect(() => {
+    if (!firebaseUser) return;
+    const myTransactionsQuery = query(
+      collection(db, 'transactions'),
+      where('uid', '==', firebaseUser.uid),
+      orderBy('createdAt', 'desc'),
+      limit(50)
+    );
+    const unsubMyTransactions = onSnapshot(myTransactionsQuery, (snap) => {
+      setMyTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.warn('Firestore my-transactions listener fallback:', err));
+    return () => unsubMyTransactions();
+  }, [firebaseUser]);
+
   // Helpers para guardar/actualizar/borrar — colecciones raíz con userId
   const firestoreAdd = async (colName, data) => {
     const uid = effectiveUserId;
@@ -776,20 +893,95 @@ export function App() {
     }).catch(err => console.warn('Error al aplicar el cambio de plan programado:', err));
   }, [firebaseUser, pendingPlanChange]);
 
+  // Al volver de Stripe Checkout/Portal, informa al usuario del resultado y limpia el parámetro de la URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const checkoutResult = params.get('checkout');
+    if (!checkoutResult) return;
+    if (checkoutResult === 'success') {
+      setNoticeModal({
+        title: language === 'es' ? 'Pago confirmado' : language === 'en' ? 'Payment confirmed' : language === 'it' ? 'Pagamento confermato' : language === 'fr' ? 'Paiement confirmé' : language === 'de' ? 'Zahlung bestätigt' : 'Pagamento confirmado',
+        message: language === 'es' ? 'Tu suscripción se está activando. Puede tardar unos segundos en reflejarse.' : language === 'en' ? 'Your subscription is being activated. It may take a few seconds to show up.' : language === 'it' ? 'Il tuo abbonamento si sta attivando. Potrebbe richiedere alcuni secondi.' : language === 'fr' ? 'Votre abonnement est en cours d\'activation. Cela peut prendre quelques secondes.' : language === 'de' ? 'Dein Abo wird gerade aktiviert. Das kann ein paar Sekunden dauern.' : 'A tua subscrição está a ser ativada. Pode demorar alguns segundos a refletir-se.',
+        type: 'success'
+      });
+    } else if (checkoutResult === 'cancelled') {
+      setNoticeModal({
+        title: language === 'es' ? 'Pago cancelado' : language === 'en' ? 'Payment cancelled' : language === 'it' ? 'Pagamento annullato' : language === 'fr' ? 'Paiement annulé' : language === 'de' ? 'Zahlung storniert' : 'Pagamento cancelado',
+        message: language === 'es' ? 'No se ha realizado ningún cargo.' : language === 'en' ? 'No charge was made.' : language === 'it' ? 'Non è stato addebitato alcun importo.' : language === 'fr' ? 'Aucun montant n\'a été débité.' : language === 'de' ? 'Es wurde kein Betrag abgebucht.' : 'Não foi efetuada nenhuma cobrança.',
+        type: 'warning'
+      });
+    }
+    params.delete('checkout');
+    const newSearch = params.toString();
+    window.history.replaceState({}, '', window.location.pathname + (newSearch ? `?${newSearch}` : ''));
+  }, []);
+
+  // Redirige a Stripe Checkout para contratar un plan de pago nuevo (la activación real la hace el webhook al completarse el pago)
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const handleStripeCheckout = async (targetPlanId, targetBillingCycle) => {
+    if (!firebaseUser || checkoutLoading) return;
+    setCheckoutLoading(true);
+    try {
+      const createCheckoutSession = httpsCallable(functions, 'createCheckoutSession');
+      const { data } = await createCheckoutSession({ planId: targetPlanId, billingCycle: targetBillingCycle });
+      if (data?.url) window.location.href = data.url;
+    } catch (err) {
+      console.error('Error al iniciar el checkout de Stripe:', err);
+      setNoticeModal({
+        title: 'Error',
+        message: language === 'es' ? 'No se pudo iniciar el proceso de pago. Inténtalo de nuevo.' : language === 'en' ? 'Could not start checkout. Please try again.' : language === 'it' ? 'Non è stato possibile avviare il pagamento. Riprova.' : language === 'fr' ? 'Impossible de démarrer le paiement. Réessayez.' : language === 'de' ? 'Der Bezahlvorgang konnte nicht gestartet werden. Bitte versuche es erneut.' : 'Não foi possível iniciar o processo de pagamento. Tenta novamente.',
+        type: 'warning'
+      });
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
+
+  // Abre el Portal de Facturación de Stripe para que el usuario gestione o cancele su suscripción activa
+  const handleOpenBillingPortal = async () => {
+    if (!firebaseUser || checkoutLoading) return;
+    setCheckoutLoading(true);
+    try {
+      const createPortalSession = httpsCallable(functions, 'createPortalSession');
+      const { data } = await createPortalSession();
+      if (data?.url) window.location.href = data.url;
+    } catch (err) {
+      console.error('Error al abrir el portal de facturación:', err);
+      setNoticeModal({
+        title: 'Error',
+        message: language === 'es' ? 'No se pudo abrir el portal de facturación.' : language === 'en' ? 'Could not open the billing portal.' : language === 'it' ? 'Non è stato possibile aprire il portale di fatturazione.' : language === 'fr' ? 'Impossible d\'ouvrir le portail de facturation.' : language === 'de' ? 'Das Rechnungsportal konnte nicht geöffnet werden.' : 'Não foi possível abrir o portal de faturação.',
+        type: 'warning'
+      });
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
+
   // Programa un cambio de plan y/o ciclo de facturación para la próxima renovación (nunca inmediato, nunca con devolución/prorrateo)
   const handlePlanSelection = async (targetPlanId, targetBillingCycle) => {
     if (!firebaseUser) return;
     const targetPlanDef = plansById[targetPlanId];
     if (!PAYMENT_GATEWAY_ENABLED && (targetPlanDef?.priceMonthly || 0) > 0) {
       setNoticeModal({
-        title: language === 'es' ? 'Mejora de Plan Aún No Disponible' : language === 'en' ? 'Plan Upgrade Not Available Yet' : 'Aggiornamento Piano Non Disponibile',
+        title: language === 'es' ? 'Mejora de Plan Aún No Disponible' : language === 'en' ? 'Plan Upgrade Not Available Yet' : language === 'it' ? 'Aggiornamento Piano Non Disponibile' : language === 'fr' ? 'Mise à Niveau du Plan Pas Encore Disponible' : language === 'de' ? 'Plan-Upgrade Noch Nicht Verfügbar' : 'Atualização de Plano Ainda Não Disponível',
         message: language === 'es'
           ? `Todavía no tenemos activada la pasarela de pago. Escríbenos a soporte y te activaremos manualmente el plan ${targetPlanDef?.name || targetPlanId}.`
           : language === 'en'
             ? `Our payment gateway isn't live yet. Contact support and we'll manually activate the ${targetPlanDef?.name || targetPlanId} plan for you.`
-            : `Il nostro gateway di pagamento non è ancora attivo. Contatta il supporto per attivare manualmente il piano ${targetPlanDef?.name || targetPlanId}.`,
+            : language === 'it'
+              ? `Il nostro gateway di pagamento non è ancora attivo. Contatta il supporto per attivare manualmente il piano ${targetPlanDef?.name || targetPlanId}.`
+              : language === 'fr'
+                ? `Notre passerelle de paiement n'est pas encore active. Contactez le support et nous activerons manuellement le plan ${targetPlanDef?.name || targetPlanId} pour vous.`
+                : language === 'de'
+                  ? `Unser Zahlungsgateway ist noch nicht aktiv. Kontaktiere den Support, und wir aktivieren manuell den Plan ${targetPlanDef?.name || targetPlanId} für dich.`
+                  : `Ainda não temos o gateway de pagamento ativado. Contacta o suporte e ativaremos manualmente o plano ${targetPlanDef?.name || targetPlanId} para ti.`,
         type: 'info'
       });
+      return;
+    }
+    // Con la pasarela activa, contratar un plan de pago nuevo se hace vía Stripe Checkout, no por escritura directa en Firestore
+    if (PAYMENT_GATEWAY_ENABLED && (targetPlanDef?.priceMonthly || 0) > 0) {
+      handleStripeCheckout(targetPlanId, targetBillingCycle);
       return;
     }
     const userDocRef = doc(db, 'users', firebaseUser.uid);
@@ -803,14 +995,20 @@ export function App() {
         updatedAt: serverTimestamp()
       });
       const planName = plansById[targetPlanId]?.name || targetPlanId;
-      const renewalLabel = nextRenewalDate.toLocaleDateString(language === 'es' ? 'es-ES' : language === 'en' ? 'en-US' : 'it-IT');
+      const renewalLabel = nextRenewalDate.toLocaleDateString(language === 'es' ? 'es-ES' : language === 'en' ? 'en-US' : language === 'it' ? 'it-IT' : language === 'fr' ? 'fr-FR' : language === 'de' ? 'de-DE' : 'pt-PT');
       setNoticeModal({
-        title: language === 'es' ? 'Cambio de Plan Programado' : language === 'en' ? 'Plan Change Scheduled' : 'Cambio Pianificato',
+        title: language === 'es' ? 'Cambio de Plan Programado' : language === 'en' ? 'Plan Change Scheduled' : language === 'it' ? 'Cambio Pianificato' : language === 'fr' ? 'Changement de Plan Programmé' : language === 'de' ? 'Planwechsel Geplant' : 'Mudança de Plano Agendada',
         message: language === 'es'
           ? `Tu plan cambiará a ${planName} a partir de tu próxima renovación (${renewalLabel}). Los cambios de plan nunca son inmediatos ni generan devoluciones o prorrateos del importe ya abonado.`
           : language === 'en'
             ? `Your plan will change to ${planName} starting your next renewal (${renewalLabel}). Plan changes are never immediate and no refunds or prorated credits are issued.`
-            : `Il tuo piano cambierà in ${planName} a partire dal prossimo rinnovo (${renewalLabel}). Nessun rimborso o storno per i cambi di piano.`,
+            : language === 'it'
+              ? `Il tuo piano cambierà in ${planName} a partire dal prossimo rinnovo (${renewalLabel}). Nessun rimborso o storno per i cambi di piano.`
+              : language === 'fr'
+                ? `Votre plan changera pour ${planName} à partir de votre prochain renouvellement (${renewalLabel}). Les changements de plan ne sont jamais immédiats et ne génèrent aucun remboursement ni prorata du montant déjà payé.`
+                : language === 'de'
+                  ? `Dein Plan wechselt zu ${planName} ab deiner nächsten Verlängerung (${renewalLabel}). Planwechsel erfolgen nie sofort und es werden keine Rückerstattungen oder anteiligen Gutschriften für bereits gezahlte Beträge ausgestellt.`
+                  : `O teu plano vai mudar para ${planName} a partir da tua próxima renovação (${renewalLabel}). As mudanças de plano nunca são imediatas nem geram reembolsos ou créditos proporcionais do valor já pago.`,
         type: 'success'
       });
     } catch (err) {
@@ -966,7 +1164,15 @@ export function App() {
         title: 'Límite de Vehículos Alcanzado',
         message: language === 'es'
           ? `Has alcanzado el límite de ${maxVehiclesLabel} vehículos de tu plan (${currentPlanDef?.name || currentPlan.toUpperCase()}). Actualiza tu suscripción en Perfil & Ajustes para añadir más.`
-          : `You reached the limit of ${maxVehiclesLabel} vehicles for your plan (${currentPlanDef?.name || currentPlan.toUpperCase()}). Please upgrade in Profile & Settings.`,
+          : language === 'en'
+            ? `You reached the limit of ${maxVehiclesLabel} vehicles for your plan (${currentPlanDef?.name || currentPlan.toUpperCase()}). Please upgrade in Profile & Settings.`
+            : language === 'it'
+              ? `Hai raggiunto il limite di ${maxVehiclesLabel} veicoli del tuo piano (${currentPlanDef?.name || currentPlan.toUpperCase()}). Aggiorna il tuo abbonamento in Profilo & Impostazioni per aggiungerne altri.`
+              : language === 'fr'
+                ? `Vous avez atteint la limite de ${maxVehiclesLabel} véhicules de votre plan (${currentPlanDef?.name || currentPlan.toUpperCase()}). Mettez à niveau votre abonnement dans Profil & Paramètres pour en ajouter davantage.`
+                : language === 'de'
+                  ? `Du hast das Limit von ${maxVehiclesLabel} Fahrzeugen deines Plans (${currentPlanDef?.name || currentPlan.toUpperCase()}) erreicht. Aktualisiere dein Abo in Profil & Einstellungen, um mehr hinzuzufügen.`
+                  : `Atingiste o limite de ${maxVehiclesLabel} veículos do teu plano (${currentPlanDef?.name || currentPlan.toUpperCase()}). Atualiza a tua subscrição em Perfil & Definições para adicionar mais.`,
         type: 'warning'
       });
       return;
@@ -1521,7 +1727,7 @@ export function App() {
             <div>
               <h1 className="text-2xl font-black text-white tracking-tight">MyGarageOps</h1>
               <p className="text-xs text-zinc-400 mt-1">
-                {language === 'es' ? 'Gestión inteligente de vehículos, repuestos y mantenimientos' : 'Smart management of vehicles, parts and maintenance'}
+                {language === 'es' ? 'Gestión inteligente de vehículos, repuestos y mantenimientos' : language === 'en' ? 'Smart management of vehicles, parts and maintenance' : language === 'it' ? 'Gestione intelligente di veicoli, ricambi e manutenzioni' : language === 'fr' ? 'Gestion intelligente des véhicules, pièces et entretiens' : language === 'de' ? 'Intelligente Verwaltung von Fahrzeugen, Ersatzteilen und Wartungen' : 'Gestão inteligente de veículos, peças e manutenções'}
               </p>
             </div>
           </div>
@@ -1540,7 +1746,7 @@ export function App() {
 
             <div className="flex items-center justify-between border-b border-zinc-800/80 pb-4">
               <h2 className="text-lg font-bold text-white">
-                {isRegisterMode ? (language === 'es' ? 'Crear Nueva Cuenta' : 'Create Account') : (language === 'es' ? 'Iniciar Sesión' : 'Sign In')}
+                {isRegisterMode ? (language === 'es' ? 'Crear Nueva Cuenta' : language === 'en' ? 'Create Account' : language === 'it' ? 'Crea Nuovo Account' : language === 'fr' ? 'Créer un Nouveau Compte' : language === 'de' ? 'Neues Konto Erstellen' : 'Criar Nova Conta') : (language === 'es' ? 'Iniciar Sesión' : language === 'en' ? 'Sign In' : language === 'it' ? 'Accedi' : language === 'fr' ? 'Se Connecter' : language === 'de' ? 'Anmelden' : 'Iniciar Sessão')}
               </h2>
               <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-xl border border-zinc-800 text-[10px]">
                 {['es', 'en', 'it', 'fr', 'de', 'pt'].map(lang => (
@@ -1566,7 +1772,7 @@ export function App() {
             <form onSubmit={handleLoginSubmit} className="space-y-4 text-xs">
               <div>
                 <label className="block text-zinc-400 font-medium mb-1.5">
-                  {language === 'es' ? 'Correo Electrónico' : 'Email Address'}
+                  {language === 'es' ? 'Correo Electrónico' : language === 'en' ? 'Email Address' : language === 'it' ? 'Indirizzo Email' : language === 'fr' ? 'Adresse E-mail' : language === 'de' ? 'E-Mail-Adresse' : 'Endereço de Email'}
                 </label>
                 <input 
                   type="email"
@@ -1580,7 +1786,7 @@ export function App() {
 
               <div>
                 <label className="block text-zinc-400 font-medium mb-1.5">
-                  {language === 'es' ? 'Contraseña' : 'Password'}
+                  {language === 'es' ? 'Contraseña' : language === 'en' ? 'Password' : language === 'it' ? 'Password' : language === 'fr' ? 'Mot de Passe' : language === 'de' ? 'Passwort' : 'Palavra-passe'}
                 </label>
                 <input 
                   type="password"
@@ -1600,15 +1806,15 @@ export function App() {
                     onChange={(e) => setLoginForm({ ...loginForm, rememberMe: e.target.checked })}
                     className="accent-orange-500 w-4 h-4 rounded"
                   />
-                  <span>{language === 'es' ? 'Recordar sesión' : 'Remember me'}</span>
+                  <span>{language === 'es' ? 'Recordar sesión' : language === 'en' ? 'Remember me' : language === 'it' ? 'Ricordami' : language === 'fr' ? 'Se souvenir de moi' : language === 'de' ? 'Angemeldet bleiben' : 'Lembrar-me'}</span>
                 </label>
 
                 <button 
                   type="button" 
-                  onClick={() => alert(language === 'es' ? 'Se ha enviado un enlace de recuperación a tu correo.' : 'Password reset link sent to your email.')}
+                  onClick={() => alert(language === 'es' ? 'Se ha enviado un enlace de recuperación a tu correo.' : language === 'en' ? 'Password reset link sent to your email.' : language === 'it' ? 'Ti abbiamo inviato un link di recupero via email.' : language === 'fr' ? 'Un lien de récupération a été envoyé à votre e-mail.' : language === 'de' ? 'Ein Link zum Zurücksetzen wurde an deine E-Mail gesendet.' : 'Foi enviado um link de recuperação para o teu email.')}
                   className="text-xs text-orange-400 hover:underline font-medium"
                 >
-                  {language === 'es' ? '¿Olvidaste tu clave?' : 'Forgot password?'}
+                  {language === 'es' ? '¿Olvidaste tu clave?' : language === 'en' ? 'Forgot password?' : language === 'it' ? 'Password dimenticata?' : language === 'fr' ? 'Mot de passe oublié ?' : language === 'de' ? 'Passwort vergessen?' : 'Esqueceste-te da palavra-passe?'}
                 </button>
               </div>
 
@@ -1617,14 +1823,14 @@ export function App() {
                 className="w-full py-3.5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm transition-all shadow-lg shadow-orange-500/25 active:scale-95 mt-2"
               >
                 {isRegisterMode 
-                  ? (language === 'es' ? 'Registrarse en MyGarageOps' : 'Register in MyGarageOps') 
-                  : (language === 'es' ? 'Entrar a Mi Garaje' : 'Access My Garage')}
+                  ? (language === 'es' ? 'Registrarse en MyGarageOps' : language === 'en' ? 'Register in MyGarageOps' : language === 'it' ? 'Registrati su MyGarageOps' : language === 'fr' ? "S'inscrire sur MyGarageOps" : language === 'de' ? 'Bei MyGarageOps registrieren' : 'Registar-me no MyGarageOps')
+                  : (language === 'es' ? 'Entrar a Mi Garaje' : language === 'en' ? 'Access My Garage' : language === 'it' ? 'Accedi al Mio Garage' : language === 'fr' ? 'Accéder à Mon Garage' : language === 'de' ? 'Zu Meiner Garage' : 'Aceder à Minha Garagem')}
               </button>
             </form>
 
             <div className="flex items-center gap-3 text-[10px] text-zinc-500 font-semibold uppercase">
               <div className="h-px flex-1 bg-zinc-800" />
-              <span>{language === 'es' ? 'o' : 'or'}</span>
+              <span>{language === 'es' ? 'o' : language === 'en' ? 'or' : language === 'it' ? 'o' : language === 'fr' ? 'ou' : language === 'de' ? 'oder' : 'ou'}</span>
               <div className="h-px flex-1 bg-zinc-800" />
             </div>
 
@@ -1639,7 +1845,7 @@ export function App() {
                 <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"/>
                 <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"/>
               </svg>
-              {language === 'es' ? 'Continuar con Google' : 'Continue with Google'}
+              {language === 'es' ? 'Continuar con Google' : language === 'en' ? 'Continue with Google' : language === 'it' ? 'Continua con Google' : language === 'fr' ? 'Continuer avec Google' : language === 'de' ? 'Mit Google fortfahren' : 'Continuar com o Google'}
             </button>
 
             <button
@@ -1650,7 +1856,7 @@ export function App() {
               <svg className="w-4 h-4" viewBox="0 0 384 512" fill="currentColor">
                 <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/>
               </svg>
-              {language === 'es' ? 'Continuar con Apple' : 'Continue with Apple'}
+              {language === 'es' ? 'Continuar con Apple' : language === 'en' ? 'Continue with Apple' : language === 'it' ? 'Continua con Apple' : language === 'fr' ? 'Continuer avec Apple' : language === 'de' ? 'Mit Apple fortfahren' : 'Continuar com a Apple'}
             </button>
 
             {/* Alternar Registro / Login */}
@@ -1658,16 +1864,16 @@ export function App() {
               <p className="text-xs text-zinc-400">
                 {isRegisterMode ? (
                   <>
-                    {language === 'es' ? '¿Ya tienes una cuenta?' : 'Already have an account?'} {' '}
+                    {language === 'es' ? '¿Ya tienes una cuenta?' : language === 'en' ? 'Already have an account?' : language === 'it' ? 'Hai già un account?' : language === 'fr' ? 'Vous avez déjà un compte ?' : language === 'de' ? 'Du hast bereits ein Konto?' : 'Já tens uma conta?'} {' '}
                     <button onClick={() => setIsRegisterMode(false)} className="text-orange-400 font-bold hover:underline">
-                      {language === 'es' ? 'Inicia sesión' : 'Sign in'}
+                      {language === 'es' ? 'Inicia sesión' : language === 'en' ? 'Sign in' : language === 'it' ? 'Accedi' : language === 'fr' ? 'Connecte-toi' : language === 'de' ? 'Anmelden' : 'Iniciar sessão'}
                     </button>
                   </>
                 ) : (
                   <>
-                    {language === 'es' ? '¿No tienes cuenta?' : "Don't have an account?"} {' '}
+                    {language === 'es' ? '¿No tienes cuenta?' : language === 'en' ? "Don't have an account?" : language === 'it' ? 'Non hai un account?' : language === 'fr' ? "Vous n'avez pas de compte ?" : language === 'de' ? 'Du hast noch kein Konto?' : 'Ainda não tens conta?'} {' '}
                     <button onClick={() => setIsRegisterMode(true)} className="text-orange-400 font-bold hover:underline">
-                      {language === 'es' ? 'Crea una gratis' : 'Create a free one'}
+                      {language === 'es' ? 'Crea una gratis' : language === 'en' ? 'Create a free one' : language === 'it' ? 'Creane uno gratis' : language === 'fr' ? 'Crées-en un gratuitement' : language === 'de' ? 'Kostenlos erstellen' : 'Cria uma grátis'}
                     </button>
                   </>
                 )}
@@ -1693,7 +1899,7 @@ export function App() {
             <div>
               <h1 className="font-bold text-lg leading-tight tracking-tight text-white">MyGarageOps</h1>
               <span className="text-[10px] font-mono tracking-wider text-orange-400 font-semibold bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20">
-                {language === 'es' ? 'Gestión de Garaje' : language === 'en' ? 'Garage Management' : 'Gestione Garage'}
+                {language === 'es' ? 'Gestión de Garaje' : language === 'en' ? 'Garage Management' : language === 'it' ? 'Gestione Garage' : language === 'fr' ? 'Gestion du Garage' : language === 'de' ? 'Garagenverwaltung' : 'Gestão de Garagem'}
               </span>
             </div>
           </div>
@@ -1811,13 +2017,13 @@ export function App() {
                 <div>
                   <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-500/10 border border-orange-500/20 text-orange-400 text-xs font-medium mb-3">
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>{language === 'es' ? 'Control Preventivo Inteligente' : language === 'en' ? 'Smart Preventive Control' : 'Controllo Preventivo Intelligente'}</span>
+                    <span>{language === 'es' ? 'Control Preventivo Inteligente' : language === 'en' ? 'Smart Preventive Control' : language === 'it' ? 'Controllo Preventivo Intelligente' : language === 'fr' ? 'Contrôle Préventif Intelligent' : language === 'de' ? 'Intelligente Vorsorgekontrolle' : 'Controlo Preventivo Inteligente'}</span>
                   </div>
                   <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
-                    {language === 'es' ? 'Estado del Garaje' : language === 'en' ? 'Garage Status' : 'Stato del Garage'}
+                    {language === 'es' ? 'Estado del Garaje' : language === 'en' ? 'Garage Status' : language === 'it' ? 'Stato del Garage' : language === 'fr' ? 'État du Garage' : language === 'de' ? 'Garagenstatus' : 'Estado da Garagem'}
                   </h2>
                   <p className="text-xs sm:text-sm text-zinc-400 mt-1 max-w-xl">
-                    {language === 'es' ? 'Monitoreo en tiempo real de tus vehículos, repuestos críticos e intervenciones de taller.' : language === 'en' ? 'Real-time monitoring of your vehicles, critical parts, and service records.' : 'Monitoraggio in tempo reale dei tuoi veicoli, ricambi critici e interventi di officina.'}
+                    {language === 'es' ? 'Monitoreo en tiempo real de tus vehículos, repuestos críticos e intervenciones de taller.' : language === 'en' ? 'Real-time monitoring of your vehicles, critical parts, and service records.' : language === 'it' ? 'Monitoraggio in tempo reale dei tuoi veicoli, ricambi critici e interventi di officina.' : language === 'fr' ? 'Suivi en temps réel de vos véhicules, pièces critiques et interventions d\'atelier.' : language === 'de' ? 'Echtzeitüberwachung deiner Fahrzeuge, kritischen Ersatzteile und Werkstatteinsätze.' : 'Monitorização em tempo real dos teus veículos, peças críticas e intervenções de oficina.'}
                   </p>
                 </div>
 
@@ -1838,7 +2044,7 @@ export function App() {
               <MetricBento 
                 title={t('vehicles')} 
                 value={vehicles.length} 
-                subtitle={language === 'es' ? 'En Garaje' : language === 'en' ? 'In Garage' : 'Nel Garage'} 
+                subtitle={language === 'es' ? 'En Garaje' : language === 'en' ? 'In Garage' : language === 'it' ? 'Nel Garage' : language === 'fr' ? 'Au Garage' : language === 'de' ? 'In der Garage' : 'Na Garagem'} 
                 icon={Bike} 
                 color="text-orange-400" 
               />
@@ -1854,7 +2060,7 @@ export function App() {
                   <MetricBento 
                     title={t('activeAlerts')} 
                     value={totalAlerts} 
-                    subtitle={totalAlerts > 0 ? `${lowStockCount} ${language === 'es' ? 'repuestos bajos' : language === 'en' ? 'low stock parts' : 'ricambi in esaurimento'}` : (language === 'es' ? 'Todo al día' : language === 'en' ? 'All up to date' : 'Tutto aggiornato')} 
+                    subtitle={totalAlerts > 0 ? `${lowStockCount} ${language === 'es' ? 'repuestos bajos' : language === 'en' ? 'low stock parts' : language === 'it' ? 'ricambi in esaurimento' : language === 'fr' ? 'pièces en stock bas' : language === 'de' ? 'Teile mit niedrigem Bestand' : 'peças com stock baixo'}` : (language === 'es' ? 'Todo al día' : language === 'en' ? 'All up to date' : language === 'it' ? 'Tutto aggiornato' : language === 'fr' ? 'Tout est à jour' : language === 'de' ? 'Alles aktuell' : 'Tudo em dia')} 
                     icon={ShieldAlert} 
                     color={totalAlerts > 0 ? "text-rose-400" : "text-emerald-400"} 
                     highlight={totalAlerts > 0} 
@@ -1871,7 +2077,7 @@ export function App() {
                   <MetricBento 
                     title={t('partsStock')} 
                     value={parts.length} 
-                    subtitle={lowStockCount > 0 ? `${lowStockCount} ${language === 'es' ? 'por reponer' : language === 'en' ? 'to order' : 'da ordinare'}` : (language === 'es' ? 'Stock suficiente' : language === 'en' ? 'Stock OK' : 'Scorta ok')} 
+                    subtitle={lowStockCount > 0 ? `${lowStockCount} ${language === 'es' ? 'por reponer' : language === 'en' ? 'to order' : language === 'it' ? 'da ordinare' : language === 'fr' ? 'à commander' : language === 'de' ? 'zu bestellen' : 'a encomendar'}` : (language === 'es' ? 'Stock suficiente' : language === 'en' ? 'Stock OK' : language === 'it' ? 'Scorta ok' : language === 'fr' ? 'Stock suffisant' : language === 'de' ? 'Bestand ausreichend' : 'Stock suficiente')} 
                     icon={Wrench} 
                     color="text-blue-400" 
                   />
@@ -1887,7 +2093,7 @@ export function App() {
                   <MetricBento 
                     title={t('totalSpent')} 
                     value={`${totalSpent.toFixed(2)} €`} 
-                    subtitle={language === 'es' ? 'Total intervenciones' : language === 'en' ? 'Total services' : 'Totale interventi'} 
+                    subtitle={language === 'es' ? 'Total intervenciones' : language === 'en' ? 'Total services' : language === 'it' ? 'Totale interventi' : language === 'fr' ? 'Total interventions' : language === 'de' ? 'Gesamt Einsätze' : 'Total de intervenções'} 
                     icon={TrendingUp} 
                     color="text-emerald-400" 
                   />
@@ -1901,11 +2107,11 @@ export function App() {
                 <div className="flex items-center gap-2">
                   <Bike className="w-4 h-4 text-orange-400" />
                   <h3 className="text-base font-bold text-white tracking-tight">
-                    {language === 'es' ? 'Vehículos Principales' : language === 'en' ? 'Main Vehicles' : 'Veicoli Principali'}
+                    {language === 'es' ? 'Vehículos Principales' : language === 'en' ? 'Main Vehicles' : language === 'it' ? 'Veicoli Principali' : language === 'fr' ? 'Véhicules Principaux' : language === 'de' ? 'Hauptfahrzeuge' : 'Veículos Principais'}
                   </h3>
                 </div>
                 <button onClick={() => setActiveTab('garage')} className="text-xs text-orange-400 hover:text-orange-300 font-semibold flex items-center gap-1">
-                  {language === 'es' ? 'Ver Garaje completo' : language === 'en' ? 'View Full Garage' : 'Vedi Garage completo'} <ArrowUpRight className="w-3.5 h-3.5" />
+                  {language === 'es' ? 'Ver Garaje completo' : language === 'en' ? 'View Full Garage' : language === 'it' ? 'Vedi Garage completo' : language === 'fr' ? 'Voir le Garage complet' : language === 'de' ? 'Ganze Garage ansehen' : 'Ver Garagem completa'} <ArrowUpRight className="w-3.5 h-3.5" />
                 </button>
               </div>
 
@@ -1936,11 +2142,11 @@ export function App() {
                 <div className="flex items-center gap-2">
                   <History className="w-4 h-4 text-orange-400" />
                   <h3 className="text-base font-bold text-white tracking-tight">
-                    {language === 'es' ? 'Últimas Intervenciones Registradas' : language === 'en' ? 'Recent Service Records' : 'Ultimi Interventi Registrati'}
+                    {language === 'es' ? 'Últimas Intervenciones Registradas' : language === 'en' ? 'Recent Service Records' : language === 'it' ? 'Ultimi Interventi Registrati' : language === 'fr' ? 'Dernières Interventions Enregistrées' : language === 'de' ? 'Zuletzt Erfasste Einsätze' : 'Últimas Intervenções Registadas'}
                   </h3>
                 </div>
                 <button onClick={() => setActiveTab('history')} className="text-xs text-orange-400 hover:text-orange-300 font-semibold flex items-center gap-1">
-                  {language === 'es' ? 'Ver Historial' : language === 'en' ? 'View History' : 'Vedi Cronologia'} <ArrowUpRight className="w-3.5 h-3.5" />
+                  {language === 'es' ? 'Ver Historial' : language === 'en' ? 'View History' : language === 'it' ? 'Vedi Cronologia' : language === 'fr' ? 'Voir l\'Historique' : language === 'de' ? 'Verlauf ansehen' : 'Ver Histórico'} <ArrowUpRight className="w-3.5 h-3.5" />
                 </button>
               </div>
 
@@ -1993,7 +2199,7 @@ export function App() {
                     return (
                       <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center gap-3 text-xs text-emerald-400 font-semibold">
                         <CheckCircle2 className="w-4 h-4 shrink-0" />
-                        <span>{language === 'es' ? '¡Tu flota está en perfecto estado y el inventario completo!' : language === 'en' ? 'Your fleet is in perfect condition and stock is full!' : 'Il tuo parco è in perfette condizioni e la scorta è completa!'}</span>
+                        <span>{language === 'es' ? '¡Tu flota está en perfecto estado y el inventario completo!' : language === 'en' ? 'Your fleet is in perfect condition and stock is full!' : language === 'it' ? 'Il tuo parco è in perfette condizioni e la scorta è completa!' : language === 'fr' ? 'Votre flotte est en parfait état et le stock est complet !' : language === 'de' ? 'Deine Flotte ist in perfektem Zustand und der Bestand ist vollständig!' : 'A tua frota está em perfeito estado e o stock está completo!'}</span>
                       </div>
                     );
                   }
@@ -2020,7 +2226,7 @@ export function App() {
                             <Wrench className="w-4 h-4 text-rose-400" />
                             <div>
                               <p className="font-bold text-rose-300">{p.name}</p>
-                              <p className="text-[10px] text-zinc-400">{language === 'es' ? 'Stock Agotándose' : language === 'en' ? 'Low Stock Alert' : 'Ricambio in esaurimento'}</p>
+                              <p className="text-[10px] text-zinc-400">{language === 'es' ? 'Stock Agotándose' : language === 'en' ? 'Low Stock Alert' : language === 'it' ? 'Ricambio in esaurimento' : language === 'fr' ? 'Stock en Baisse' : language === 'de' ? 'Bestand wird knapp' : 'Stock a Esgotar'}</p>
                             </div>
                           </div>
                           <button onClick={() => setActiveTab('parts')} className="px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white rounded-lg text-[10px] font-bold transition-all">
@@ -2080,7 +2286,7 @@ export function App() {
                 </div>
 
                 <div className="pt-2 border-t border-zinc-800/80 flex items-center justify-between text-[11px] text-zinc-400">
-                  <span>{language === 'es' ? 'Optimización DIY calculada' : language === 'en' ? 'Calculated DIY Savings' : 'Risparmio DIY calcolato'}</span>
+                  <span>{language === 'es' ? 'Optimización DIY calculada' : language === 'en' ? 'Calculated DIY Savings' : language === 'it' ? 'Risparmio DIY calcolato' : language === 'fr' ? 'Économies DIY calculées' : language === 'de' ? 'Berechnete DIY-Ersparnis' : 'Poupança DIY calculada'}</span>
                   <span className="font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">+35% ahorro</span>
                 </div>
               </div>
@@ -2111,7 +2317,7 @@ export function App() {
 
                 <button 
                   onClick={() => openEditVehicleModal(selectedVehicle)}
-                  title={language === 'es' ? 'Editar Vehículo' : 'Edit Vehicle'}
+                  title={language === 'es' ? 'Editar Vehículo' : language === 'en' ? 'Edit Vehicle' : language === 'it' ? 'Modifica Veicolo' : language === 'fr' ? 'Modifier le Véhicule' : language === 'de' ? 'Fahrzeug Bearbeiten' : 'Editar Veículo'}
                   className="p-2 rounded-xl text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10 transition-colors border border-transparent hover:border-amber-500/20"
                 >
                   <Edit2 className="w-4 h-4" />
@@ -2227,8 +2433,8 @@ export function App() {
                           }`}>
                             {getInspectionLabel(language)}:{' '}
                             {inspection.days < 0
-                              ? (language === 'es' ? `venció hace ${Math.abs(inspection.days)} días` : language === 'en' ? `overdue by ${Math.abs(inspection.days)} days` : `scaduta da ${Math.abs(inspection.days)} giorni`)
-                              : (language === 'es' ? `en ${inspection.days} días` : language === 'en' ? `in ${inspection.days} days` : `tra ${inspection.days} giorni`)}
+                              ? (language === 'es' ? `venció hace ${Math.abs(inspection.days)} días` : language === 'en' ? `overdue by ${Math.abs(inspection.days)} days` : language === 'it' ? `scaduta da ${Math.abs(inspection.days)} giorni` : language === 'fr' ? `en retard de ${Math.abs(inspection.days)} jours` : language === 'de' ? `seit ${Math.abs(inspection.days)} Tagen überfällig` : `venceu há ${Math.abs(inspection.days)} dias`)
+                              : (language === 'es' ? `en ${inspection.days} días` : language === 'en' ? `in ${inspection.days} days` : language === 'it' ? `tra ${inspection.days} giorni` : language === 'fr' ? `dans ${inspection.days} jours` : language === 'de' ? `in ${inspection.days} Tagen` : `em ${inspection.days} dias`)}
                           </span>
                         );
                       })()}
@@ -2449,7 +2655,7 @@ export function App() {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-2xl font-extrabold text-white tracking-tight">{t('garage')}</h2>
-                <p className="text-xs text-zinc-400 mt-0.5">{language === 'es' ? 'Control individual de cada vehículo registrado.' : language === 'en' ? 'Individual control for each registered vehicle.' : 'Controllo individuale per ogni veicolo registrato.'}</p>
+                <p className="text-xs text-zinc-400 mt-0.5">{language === 'es' ? 'Control individual de cada vehículo registrado.' : language === 'en' ? 'Individual control for each registered vehicle.' : language === 'it' ? 'Controllo individuale per ogni veicolo registrato.' : language === 'fr' ? 'Contrôle individuel de chaque véhicule enregistré.' : language === 'de' ? 'Individuelle Kontrolle für jedes registrierte Fahrzeug.' : 'Controlo individual de cada veículo registado.'}</p>
               </div>
               <button 
                 onClick={() => {
@@ -2490,7 +2696,7 @@ export function App() {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-2xl font-extrabold text-white tracking-tight">{t('partsTitle')}</h2>
-                <p className="text-xs text-zinc-400 mt-0.5">{language === 'es' ? 'Gestión de piezas, consumibles y stock mínimo.' : language === 'en' ? 'Management of parts, consumables, and minimum stock.' : 'Gestione di parti, consumabili e scorta minima.'}</p>
+                <p className="text-xs text-zinc-400 mt-0.5">{language === 'es' ? 'Gestión de piezas, consumibles y stock mínimo.' : language === 'en' ? 'Management of parts, consumables, and minimum stock.' : language === 'it' ? 'Gestione di parti, consumabili e scorta minima.' : language === 'fr' ? 'Gestion des pièces, consommables et stock minimum.' : language === 'de' ? 'Verwaltung von Teilen, Verbrauchsmaterial und Mindestbestand.' : 'Gestão de peças, consumíveis e stock mínimo.'}</p>
               </div>
               <button 
                 onClick={() => {
@@ -2522,7 +2728,7 @@ export function App() {
                   type="text" 
                   value={partSearch}
                   onChange={(e) => setPartSearch(e.target.value)}
-                  placeholder={language === 'es' ? 'Buscar repuesto por nombre o vehículo compatible...' : language === 'en' ? 'Search part by name or compatible vehicle...' : 'Cerca ricambio per nome o veicolo compatibile...'} 
+                  placeholder={language === 'es' ? 'Buscar repuesto por nombre o vehículo compatible...' : language === 'en' ? 'Search part by name or compatible vehicle...' : language === 'it' ? 'Cerca ricambio per nome o veicolo compatibile...' : language === 'fr' ? 'Rechercher une pièce par nom ou véhicule compatible...' : language === 'de' ? 'Ersatzteil nach Name oder kompatiblem Fahrzeug suchen...' : 'Procurar peça por nome ou veículo compatível...'} 
                   className="bg-transparent text-xs text-zinc-200 outline-none w-full placeholder:text-zinc-600" 
                 />
               </div>
@@ -2568,13 +2774,13 @@ export function App() {
                               )}
                               {purchases.length > 1 && (
                                 <span className="text-[10px] font-mono bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2 py-0.5 rounded-full font-bold">
-                                  {purchases.length} {language === 'es' ? 'Lotes de Compra' : language === 'en' ? 'Purchase Batches' : 'Lotti d\'acquisto'}
+                                  {purchases.length} {language === 'es' ? 'Lotes de Compra' : language === 'en' ? 'Purchase Batches' : language === 'it' ? 'Lotti d\'acquisto' : language === 'fr' ? 'Lots d\'Achat' : language === 'de' ? 'Einkaufschargen' : 'Lotes de Compra'}
                                 </span>
                               )}
                             </div>
 
                             <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                              <span className="text-[10px] text-zinc-500 font-medium">{language === 'es' ? 'Compatibilidad:' : language === 'en' ? 'Compatibility:' : 'Compatibilità:'}</span>
+                              <span className="text-[10px] text-zinc-500 font-medium">{language === 'es' ? 'Compatibilidad:' : language === 'en' ? 'Compatibility:' : language === 'it' ? 'Compatibilità:' : language === 'fr' ? 'Compatibilité :' : language === 'de' ? 'Kompatibilität:' : 'Compatibilidade:'}</span>
                               {vehList.map((vName, idx) => (
                                 <span key={idx} className="text-[10px] bg-zinc-800 text-zinc-300 font-mono px-2 py-0.5 rounded-lg border border-zinc-700/60">
                                   {vName}
@@ -2590,10 +2796,10 @@ export function App() {
                                   ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' 
                                   : 'bg-zinc-800 text-zinc-300 border-zinc-700/60'
                               }`}>
-                                {formatQty(totalStock)} {p.unit || 'ud'} {isLow && (language === 'es' ? '(Stock Bajo)' : language === 'en' ? '(Low Stock)' : '(Scorta Bassa)')}
+                                {formatQty(totalStock)} {p.unit || 'ud'} {isLow && (language === 'es' ? '(Stock Bajo)' : language === 'en' ? '(Low Stock)' : language === 'it' ? '(Scorta Bassa)' : language === 'fr' ? '(Stock Bas)' : language === 'de' ? '(Niedriger Bestand)' : '(Stock Baixo)')}
                               </span>
                               <p className="text-[11px] font-mono text-zinc-400 mt-1 font-semibold">
-                                {prices.length > 0 ? priceLabel : (language === 'es' ? 'Sin compras' : language === 'en' ? 'No purchases' : 'Nessun acquisto')}
+                                {prices.length > 0 ? priceLabel : (language === 'es' ? 'Sin compras' : language === 'en' ? 'No purchases' : language === 'it' ? 'Nessun acquisto' : language === 'fr' ? 'Aucun achat' : language === 'de' ? 'Keine Käufe' : 'Sem compras')}
                               </p>
                             </div>
 
@@ -2607,7 +2813,7 @@ export function App() {
                                 className="px-2.5 py-1.5 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/30 text-[11px] font-bold transition-all flex items-center gap-1"
                               >
                                 <Plus className="w-3.5 h-3.5" />
-                                <span>+ {language === 'es' ? 'Compra' : language === 'en' ? 'Batch' : 'Lotto'}</span>
+                                <span>+ {language === 'es' ? 'Compra' : language === 'en' ? 'Batch' : language === 'it' ? 'Lotto' : language === 'fr' ? 'Lot' : language === 'de' ? 'Charge' : 'Lote'}</span>
                               </button>
                               <button
                                 onClick={() => setSelectedPartForBatches(isExpanded ? null : p.id)}
@@ -2639,7 +2845,7 @@ export function App() {
                           <div className="p-4 bg-zinc-950/80 space-y-2">
                             <div className="flex items-center justify-between">
                               <span className="text-[11px] font-mono text-zinc-400 font-bold uppercase tracking-wider">
-                                {language === 'es' ? 'Lotes de Compra & Precios Registrados' : language === 'en' ? 'Registered Purchase Batches & Prices' : 'Lotti d\'acquisto e prezzi registrati'} ({purchases.length})
+                                {language === 'es' ? 'Lotes de Compra & Precios Registrados' : language === 'en' ? 'Registered Purchase Batches & Prices' : language === 'it' ? 'Lotti d\'acquisto e prezzi registrati' : language === 'fr' ? 'Lots d\'Achat et Prix Enregistrés' : language === 'de' ? 'Erfasste Einkaufschargen & Preise' : 'Lotes de Compra e Preços Registados'} ({purchases.length})
                               </span>
                             </div>
 
@@ -2653,7 +2859,7 @@ export function App() {
                                       </span>
                                       <div>
                                         <p className="font-semibold text-zinc-200">{b.supplier || 'Taller / Proveedor'}</p>
-                                        <p className="text-[10px] text-zinc-500 font-mono">{language === 'es' ? 'Adquirido el' : language === 'en' ? 'Purchased on' : 'Acquistato il'} {b.date}</p>
+                                        <p className="text-[10px] text-zinc-500 font-mono">{language === 'es' ? 'Adquirido el' : language === 'en' ? 'Purchased on' : language === 'it' ? 'Acquistato il' : language === 'fr' ? 'Acheté le' : language === 'de' ? 'Gekauft am' : 'Adquirido em'} {b.date}</p>
                                       </div>
                                     </div>
                                     <span className="font-mono font-bold text-zinc-100 bg-zinc-800 px-2.5 py-1 rounded-lg border border-zinc-700">
@@ -2692,7 +2898,7 @@ export function App() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-extrabold text-white tracking-tight">{t('historyTitle')}</h2>
-                <p className="text-xs text-zinc-400 mt-0.5">{language === 'es' ? 'Libro digital de servicios y certificado para venta.' : language === 'en' ? 'Digital service logbook and sale certificate.' : 'Libretto digitale dei servizi e certificato per la vendita.'}</p>
+                <p className="text-xs text-zinc-400 mt-0.5">{language === 'es' ? 'Libro digital de servicios y certificado para venta.' : language === 'en' ? 'Digital service logbook and sale certificate.' : language === 'it' ? 'Libretto digitale dei servizi e certificato per la vendita.' : language === 'fr' ? 'Carnet numérique d\'entretien et certificat de vente.' : language === 'de' ? 'Digitales Serviceheft und Verkaufszertifikat.' : 'Livrete digital de serviços e certificado de venda.'}</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button 
@@ -2757,10 +2963,10 @@ export function App() {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-2xl font-extrabold text-white tracking-tight">
-                  {language === 'es' ? 'Perfil & Ajustes' : language === 'en' ? 'Profile & Settings' : 'Profilo & Impostazioni'}
+                  {language === 'es' ? 'Perfil & Ajustes' : language === 'en' ? 'Profile & Settings' : language === 'it' ? 'Profilo & Impostazioni' : language === 'fr' ? 'Profil & Paramètres' : language === 'de' ? 'Profil & Einstellungen' : 'Perfil & Definições'}
                 </h2>
                 <p className="text-xs text-zinc-400 mt-0.5">
-                  {language === 'es' ? 'Configuración de idioma, cuenta y plan de suscripción.' : language === 'en' ? 'Language, account, and subscription plan settings.' : 'Lingua, conto e impostazioni del piano di abbonamento.'}
+                  {language === 'es' ? 'Configuración de idioma, cuenta y plan de suscripción.' : language === 'en' ? 'Language, account, and subscription plan settings.' : language === 'it' ? 'Lingua, conto e impostazioni del piano di abbonamento.' : language === 'fr' ? "Paramètres de langue, compte et plan d'abonnement." : language === 'de' ? 'Sprach-, Konto- und Abo-Plan-Einstellungen.' : 'Configurações de idioma, conta e plano de subscrição.'}
                 </p>
               </div>
               <button
@@ -2768,7 +2974,7 @@ export function App() {
                 className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-xs font-bold transition-all active:scale-95 flex items-center gap-1.5"
               >
                 <User className="w-3.5 h-3.5" />
-                <span>{language === 'es' ? 'Cerrar Sesión' : 'Log Out'}</span>
+                <span>{language === 'es' ? 'Cerrar Sesión' : language === 'en' ? 'Log Out' : language === 'it' ? 'Esci' : language === 'fr' ? 'Se Déconnecter' : language === 'de' ? 'Abmelden' : 'Terminar Sessão'}</span>
               </button>
             </div>
 
@@ -2780,7 +2986,7 @@ export function App() {
                 </div>
                 <div>
                   <span className="text-[10px] font-mono text-zinc-500 uppercase font-bold block">
-                    {language === 'es' ? 'Cuenta Activa' : 'Logged in as'}
+                    {language === 'es' ? 'Cuenta Activa' : language === 'en' ? 'Logged in as' : language === 'it' ? 'Account Attivo' : language === 'fr' ? 'Compte Actif' : language === 'de' ? 'Aktives Konto' : 'Conta Ativa'}
                   </span>
                   <p className="text-sm font-bold text-white font-mono">{userEmail}</p>
                 </div>
@@ -2798,10 +3004,10 @@ export function App() {
                 </div>
                 <div>
                   <h3 className="font-bold text-sm text-white">
-                    {language === 'es' ? 'Idioma de la Aplicación' : language === 'en' ? 'App Language' : 'Lingua dell\'applicazione'}
+                    {language === 'es' ? 'Idioma de la Aplicación' : language === 'en' ? 'App Language' : language === 'it' ? 'Lingua dell\'applicazione' : language === 'fr' ? "Langue de l'Application" : language === 'de' ? 'App-Sprache' : 'Idioma da Aplicação'}
                   </h3>
                   <p className="text-[11px] text-zinc-400">
-                    {language === 'es' ? 'Selecciona tu idioma preferido' : language === 'en' ? 'Select your preferred language' : 'Seleziona la tua lingua preferita'}
+                    {language === 'es' ? 'Selecciona tu idioma preferido' : language === 'en' ? 'Select your preferred language' : language === 'it' ? 'Seleziona la tua lingua preferita' : language === 'fr' ? 'Sélectionnez votre langue préférée' : language === 'de' ? 'Wähle deine bevorzugte Sprache' : 'Seleciona o teu idioma preferido'}
                   </p>
                 </div>
               </div>
@@ -2837,7 +3043,7 @@ export function App() {
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-[10px] font-mono uppercase tracking-widest text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20 font-bold">
-                    {language === 'es' ? 'Suscripción Activa' : language === 'en' ? 'Active Subscription' : 'Abbonamento Attivo'}
+                    {language === 'es' ? 'Suscripción Activa' : language === 'en' ? 'Active Subscription' : language === 'it' ? 'Abbonamento Attivo' : language === 'fr' ? 'Abonnement Actif' : language === 'de' ? 'Aktives Abo' : 'Subscrição Ativa'}
                   </span>
                   <h3 className="text-2xl font-extrabold text-white mt-2">
                     {currentPlanDef?.name || currentPlan}
@@ -2847,11 +3053,28 @@ export function App() {
                       ? `Renovación automática el ${nextRenewalDate.toLocaleDateString('es-ES')} (${activeBillingCycle === 'annual' ? 'anual' : 'mensual'})`
                       : language === 'en'
                         ? `Auto-renewal on ${nextRenewalDate.toLocaleDateString('en-US')} (${activeBillingCycle === 'annual' ? 'annual' : 'monthly'})`
-                        : `Rinnovo automatico il ${nextRenewalDate.toLocaleDateString('it-IT')} (${activeBillingCycle === 'annual' ? 'annuale' : 'mensile'})`}
+                        : language === 'it'
+                          ? `Rinnovo automatico il ${nextRenewalDate.toLocaleDateString('it-IT')} (${activeBillingCycle === 'annual' ? 'annuale' : 'mensile'})`
+                          : language === 'fr'
+                            ? `Renouvellement automatique le ${nextRenewalDate.toLocaleDateString('fr-FR')} (${activeBillingCycle === 'annual' ? 'annuel' : 'mensuel'})`
+                            : language === 'de'
+                              ? `Automatische Verlängerung am ${nextRenewalDate.toLocaleDateString('de-DE')} (${activeBillingCycle === 'annual' ? 'jährlich' : 'monatlich'})`
+                              : `Renovação automática em ${nextRenewalDate.toLocaleDateString('pt-PT')} (${activeBillingCycle === 'annual' ? 'anual' : 'mensal'})`}
                   </p>
                 </div>
-                <div className="w-14 h-14 rounded-2xl bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400 shrink-0">
-                  <Zap className="w-7 h-7 stroke-[2.5]" />
+                <div className="flex items-center gap-3">
+                  {PAYMENT_GATEWAY_ENABLED && userProfile?.stripeCustomerId && (
+                    <button
+                      onClick={handleOpenBillingPortal}
+                      disabled={checkoutLoading}
+                      className="text-xs font-mono px-3 py-2 rounded-xl border border-zinc-700 text-zinc-300 hover:text-white hover:border-orange-500/40 transition-colors disabled:opacity-50"
+                    >
+                      {language === 'es' ? 'Gestionar suscripción' : language === 'en' ? 'Manage subscription' : language === 'it' ? 'Gestisci abbonamento' : language === 'fr' ? "Gérer l'abonnement" : language === 'de' ? 'Abo verwalten' : 'Gerir subscrição'}
+                    </button>
+                  )}
+                  <div className="w-14 h-14 rounded-2xl bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400 shrink-0">
+                    <Zap className="w-7 h-7 stroke-[2.5]" />
+                  </div>
                 </div>
               </div>
 
@@ -2862,14 +3085,20 @@ export function App() {
                       ? <>Tu plan cambiará a <strong>{plansById[pendingPlanChange.planId]?.name || pendingPlanChange.planId}</strong> ({pendingPlanChange.billingCycle === 'annual' ? 'anual' : 'mensual'}) el <strong>{new Date(pendingPlanChange.effectiveAt).toLocaleDateString('es-ES')}</strong>. Sin devoluciones ni prorrateos.</>
                       : language === 'en'
                         ? <>Your plan will change to <strong>{plansById[pendingPlanChange.planId]?.name || pendingPlanChange.planId}</strong> ({pendingPlanChange.billingCycle === 'annual' ? 'annual' : 'monthly'}) on <strong>{new Date(pendingPlanChange.effectiveAt).toLocaleDateString('en-US')}</strong>. No refunds or prorated credits.</>
-                        : <>Il tuo piano cambierà in <strong>{plansById[pendingPlanChange.planId]?.name || pendingPlanChange.planId}</strong> il <strong>{new Date(pendingPlanChange.effectiveAt).toLocaleDateString('it-IT')}</strong>.</>}
+                        : language === 'it'
+                          ? <>Il tuo piano cambierà in <strong>{plansById[pendingPlanChange.planId]?.name || pendingPlanChange.planId}</strong> il <strong>{new Date(pendingPlanChange.effectiveAt).toLocaleDateString('it-IT')}</strong>.</>
+                          : language === 'fr'
+                            ? <>Votre plan changera pour <strong>{plansById[pendingPlanChange.planId]?.name || pendingPlanChange.planId}</strong> ({pendingPlanChange.billingCycle === 'annual' ? 'annuel' : 'mensuel'}) le <strong>{new Date(pendingPlanChange.effectiveAt).toLocaleDateString('fr-FR')}</strong>. Aucun remboursement ni prorata.</>
+                            : language === 'de'
+                              ? <>Dein Plan wechselt zu <strong>{plansById[pendingPlanChange.planId]?.name || pendingPlanChange.planId}</strong> ({pendingPlanChange.billingCycle === 'annual' ? 'jährlich' : 'monatlich'}) am <strong>{new Date(pendingPlanChange.effectiveAt).toLocaleDateString('de-DE')}</strong>. Keine Rückerstattungen oder anteiligen Gutschriften.</>
+                              : <>O teu plano vai mudar para <strong>{plansById[pendingPlanChange.planId]?.name || pendingPlanChange.planId}</strong> ({pendingPlanChange.billingCycle === 'annual' ? 'anual' : 'mensal'}) em <strong>{new Date(pendingPlanChange.effectiveAt).toLocaleDateString('pt-PT')}</strong>. Sem reembolsos nem valores proporcionais.</>}
                   </p>
                   <button
                     type="button"
                     onClick={handleCancelPendingPlanChange}
                     className="shrink-0 px-3 py-1.5 rounded-xl text-[11px] font-bold bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-600 transition-all"
                   >
-                    {language === 'es' ? 'Cancelar cambio' : language === 'en' ? 'Cancel change' : 'Annulla'}
+                    {language === 'es' ? 'Cancelar cambio' : language === 'en' ? 'Cancel change' : language === 'it' ? 'Annulla' : language === 'fr' ? "Annuler le changement" : language === 'de' ? 'Änderung abbrechen' : 'Cancelar alteração'}
                   </button>
                 </div>
               )}
@@ -2878,7 +3107,7 @@ export function App() {
               <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800 space-y-3">
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-zinc-400 font-medium">
-                    {language === 'es' ? 'Vehículos en Garaje' : language === 'en' ? 'Garage Vehicles' : 'Veicoli nel Garage'}
+                    {language === 'es' ? 'Vehículos en Garaje' : language === 'en' ? 'Garage Vehicles' : language === 'it' ? 'Veicoli nel Garage' : language === 'fr' ? 'Véhicules au Garage' : language === 'de' ? 'Fahrzeuge in der Garage' : 'Veículos na Garagem'}
                   </span>
                   <span className="font-mono font-bold text-orange-400">
                     {vehicles.length} / {maxVehiclesAllowed === Infinity ? 'Ilimitados' : maxVehiclesLabel}
@@ -2895,7 +3124,7 @@ export function App() {
               {/* Selector de Periodo: Mensual / Anual (-20%) */}
               <div className="flex items-center justify-between bg-zinc-950 p-2.5 rounded-2xl border border-zinc-800">
                 <span className="text-xs font-semibold text-zinc-300 pl-2">
-                  {language === 'es' ? 'Frecuencia de Facturación' : language === 'en' ? 'Billing Cycle' : 'Ciclo di fatturazione'}
+                  {language === 'es' ? 'Frecuencia de Facturación' : language === 'en' ? 'Billing Cycle' : language === 'it' ? 'Ciclo di fatturazione' : language === 'fr' ? 'Cycle de Facturation' : language === 'de' ? 'Abrechnungszyklus' : 'Ciclo de Faturação'}
                 </span>
                 <div className="flex items-center gap-1 bg-zinc-900 p-1 rounded-xl border border-zinc-800 text-xs">
                   <button
@@ -2905,7 +3134,7 @@ export function App() {
                       billingCycle === 'monthly' ? 'bg-orange-500 text-white shadow' : 'text-zinc-400 hover:text-white'
                     }`}
                   >
-                    {language === 'es' ? 'Mensual' : language === 'en' ? 'Monthly' : 'Mensile'}
+                    {language === 'es' ? 'Mensual' : language === 'en' ? 'Monthly' : language === 'it' ? 'Mensile' : language === 'fr' ? 'Mensuel' : language === 'de' ? 'Monatlich' : 'Mensal'}
                   </button>
                   <button
                     type="button"
@@ -2914,7 +3143,7 @@ export function App() {
                       billingCycle === 'annual' ? 'bg-orange-500 text-white shadow' : 'text-zinc-400 hover:text-white'
                     }`}
                   >
-                    <span>{language === 'es' ? 'Anual' : language === 'en' ? 'Annual' : 'Annuale'}</span>
+                    <span>{language === 'es' ? 'Anual' : language === 'en' ? 'Annual' : language === 'it' ? 'Annuale' : language === 'fr' ? 'Annuel' : language === 'de' ? 'Jährlich' : 'Anual'}</span>
                     <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded font-mono font-bold">-20%</span>
                   </button>
                 </div>
@@ -2937,12 +3166,12 @@ export function App() {
                     }`}>
                       {plan.highlight && !isDiscontinued && (
                         <span className="absolute -top-2.5 right-4 bg-orange-500 text-white text-[9px] font-mono font-extrabold uppercase px-2 py-0.5 rounded-full shadow">
-                          {language === 'es' ? 'Más Popular' : language === 'en' ? 'Most Popular' : 'Più Popolare'}
+                          {language === 'es' ? 'Más Popular' : language === 'en' ? 'Most Popular' : language === 'it' ? 'Più Popolare' : language === 'fr' ? 'Le Plus Populaire' : language === 'de' ? 'Am Beliebtesten' : 'Mais Popular'}
                         </span>
                       )}
                       {isDiscontinued && (
                         <span className="absolute -top-2.5 right-4 bg-zinc-700 text-zinc-300 text-[9px] font-mono font-extrabold uppercase px-2 py-0.5 rounded-full shadow">
-                          {language === 'es' ? 'Descontinuado' : language === 'en' ? 'Discontinued' : 'Interrotto'}
+                          {language === 'es' ? 'Descontinuado' : language === 'en' ? 'Discontinued' : language === 'it' ? 'Interrotto' : language === 'fr' ? 'Discontinué' : language === 'de' ? 'Eingestellt' : 'Descontinuado'}
                         </span>
                       )}
                       <div>
@@ -2951,20 +3180,20 @@ export function App() {
                           {price > 0 ? (
                             <>
                               <span className="text-xl font-extrabold text-white font-mono">{price.toFixed(2)} €</span>
-                              <span className="text-[10px] text-zinc-500 font-mono"> / {language === 'es' ? 'mes' : language === 'en' ? 'mo' : 'mese'}</span>
+                              <span className="text-[10px] text-zinc-500 font-mono"> / {language === 'es' ? 'mes' : language === 'en' ? 'mo' : language === 'it' ? 'mese' : language === 'fr' ? 'mois' : language === 'de' ? 'Monat' : 'mês'}</span>
                             </>
                           ) : (
                             <span className="text-xl font-extrabold text-white font-mono">
-                              {language === 'es' ? 'Gratis' : language === 'en' ? 'Free' : 'Gratis'}
+                              {language === 'es' ? 'Gratis' : language === 'en' ? 'Free' : language === 'it' ? 'Gratis' : language === 'fr' ? 'Gratuit' : language === 'de' ? 'Kostenlos' : 'Grátis'}
                             </span>
                           )}
                         </div>
                         <ul className="mt-3 space-y-1.5 text-[11px] text-zinc-400">
                           <li className="flex items-center gap-1.5">
                             <CheckCircle2 className="w-3.5 h-3.5 text-orange-400 shrink-0" />
-                            <span><strong>{planMaxVeh === '∞' ? (language === 'es' ? 'Vehículos Ilimitados' : 'Unlimited Vehicles') : `${language === 'es' ? 'Hasta' : 'Up to'} ${planMaxVeh} ${t('vehicles')}`}</strong></span>
+                            <span><strong>{planMaxVeh === '∞' ? (language === 'es' ? 'Vehículos Ilimitados' : language === 'en' ? 'Unlimited Vehicles' : language === 'it' ? 'Veicoli Illimitati' : language === 'fr' ? 'Véhicules Illimités' : language === 'de' ? 'Unbegrenzte Fahrzeuge' : 'Veículos Ilimitados') : `${language === 'es' ? 'Hasta' : language === 'en' ? 'Up to' : language === 'it' ? 'Fino a' : language === 'fr' ? "Jusqu'à" : language === 'de' ? 'Bis zu' : 'Até'} ${planMaxVeh} ${t('vehicles')}`}</strong></span>
                           </li>
-                          {(plan.features || []).map((feat, idx) => (
+                          {getLocalizedPlanList(plan.features, language).map((feat, idx) => (
                             <li key={idx} className="flex items-center gap-1.5">
                               <CheckCircle2 className="w-3.5 h-3.5 text-orange-400 shrink-0" />
                               <span>{feat}</span>
@@ -2988,61 +3217,138 @@ export function App() {
                         }`}
                       >
                         {isCurrent
-                          ? (language === 'es' ? 'Plan Actual' : language === 'en' ? 'Current Plan' : 'Piano Attuale')
+                          ? (language === 'es' ? 'Plan Actual' : language === 'en' ? 'Current Plan' : language === 'it' ? 'Piano Attuale' : language === 'fr' ? 'Plan Actuel' : language === 'de' ? 'Aktueller Plan' : 'Plano Atual')
                           : isPendingTarget
-                            ? (language === 'es' ? 'Programado' : language === 'en' ? 'Scheduled' : 'Pianificato')
+                            ? (language === 'es' ? 'Programado' : language === 'en' ? 'Scheduled' : language === 'it' ? 'Pianificato' : language === 'fr' ? 'Programmé' : language === 'de' ? 'Geplant' : 'Agendado')
                             : isPaidLocked
-                              ? (language === 'es' ? '🔒 Solicitar a Soporte' : language === 'en' ? '🔒 Request from Support' : '🔒 Richiedi al Supporto')
-                              : (language === 'es' ? `Seleccionar ${plan.name}` : language === 'en' ? `Select ${plan.name}` : `Seleziona ${plan.name}`)}
+                              ? (language === 'es' ? '🔒 Solicitar a Soporte' : language === 'en' ? '🔒 Request from Support' : language === 'it' ? '🔒 Richiedi al Supporto' : language === 'fr' ? '🔒 Demander au Support' : language === 'de' ? '🔒 Beim Support Anfragen' : '🔒 Pedir ao Suporte')
+                              : (language === 'es' ? `Seleccionar ${plan.name}` : language === 'en' ? `Select ${plan.name}` : language === 'it' ? `Seleziona ${plan.name}` : language === 'fr' ? `Sélectionner ${plan.name}` : language === 'de' ? `${plan.name} Auswählen` : `Selecionar ${plan.name}`)}
                       </button>
                     </div>
                   );
                 })}
               </div>
 
-              {/* Botones de Acción de Facturación Stripe */}
-              <div className="pt-2 flex flex-col sm:flex-row gap-3">
-                <button 
-                  onClick={() => {
-                    setNoticeModal({
-                      title: 'Portal de Facturación',
-                      message: language === 'es'
-                        ? 'Redirigiendo a la pasarela segura de pago Stripe Customer Portal...'
-                        : language === 'en'
-                        ? 'Redirecting to secure Stripe Customer Portal...'
-                        : 'Reindirizzamento al portale clienti sicuro Stripe...',
-                      type: 'info'
-                    });
-                  }}
-                  className="px-5 py-3 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow-lg shadow-orange-500/25 transition-all flex items-center justify-center gap-2"
-                >
-                  <Zap className="w-4 h-4 fill-white" />
-                  <span>
-                    {language === 'es' ? 'Portal de Facturación Stripe' : language === 'en' ? 'Stripe Billing Portal' : 'Portale di fatturazione Stripe'}
-                  </span>
-                </button>
-                
-                <button 
-                  onClick={() => {
-                    setNoticeModal({
-                      title: 'Facturas PDF',
-                      message: language === 'es'
-                        ? 'Se han generado y descargado tus últimas facturas en formato PDF.'
-                        : language === 'en'
-                        ? 'Your latest invoices have been downloaded in PDF format.'
-                        : 'Le tue ultime fatture sono state scaricate in formato PDF.',
-                      type: 'success'
-                    });
-                  }}
-                  className="px-5 py-3 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-semibold text-xs border border-zinc-700 transition-all flex items-center justify-center gap-2"
-                >
-                  <FileText className="w-4 h-4 text-zinc-400" />
-                  <span>
-                    {language === 'es' ? 'Descargar Facturas PDF' : language === 'en' ? 'Download Invoices PDF' : 'Scarica fatture PDF'}
-                  </span>
-                </button>
-              </div>
+              {/* El acceso a facturas y su descarga en PDF se hace desde el botón "Gestionar suscripción" de
+                  arriba, que abre el Portal de Facturación real de Stripe (incluye historial de facturas). */}
+              {PAYMENT_GATEWAY_ENABLED && !userProfile?.stripeCustomerId && (
+                <p className="text-xs text-zinc-500 pt-1">
+                  {language === 'es'
+                    ? 'Cuando contrates un plan de pago podrás gestionar tu suscripción y descargar tus facturas desde aquí.'
+                    : language === 'en'
+                    ? 'Once you subscribe to a paid plan, you\'ll be able to manage your subscription and download invoices here.'
+                    : language === 'it'
+                    ? 'Quando sottoscrivi un piano a pagamento potrai gestire il tuo abbonamento e scaricare le fatture da qui.'
+                    : language === 'fr'
+                    ? "Une fois abonné à un plan payant, vous pourrez gérer votre abonnement et télécharger vos factures ici."
+                    : language === 'de'
+                    ? 'Sobald du einen kostenpflichtigen Plan abonnierst, kannst du hier dein Abo verwalten und Rechnungen herunterladen.'
+                    : 'Assim que subscreveres um plano pago, poderás gerir a tua subscrição e descarregar as tuas faturas aqui.'}
+                </p>
+              )}
             </div>
+
+            {/* SECTOR: MIS PAGOS — historial de facturación propio del usuario (altas, pagos, cambios, bajas) */}
+            {myTransactions.length > 0 && (() => {
+              const MY_TX_TYPE_LABELS = {
+                alta: {
+                  es: 'Alta', en: 'Sign-up', it: 'Attivazione', fr: 'Inscription', de: 'Anmeldung', pt: 'Adesão',
+                  className: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                },
+                pago: {
+                  es: 'Pago', en: 'Payment', it: 'Pagamento', fr: 'Paiement', de: 'Zahlung', pt: 'Pagamento',
+                  className: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                },
+                modificacion: {
+                  es: 'Cambio de plan', en: 'Plan change', it: 'Cambio piano', fr: 'Changement de plan', de: 'Tarifwechsel', pt: 'Mudança de plano',
+                  className: 'bg-sky-500/10 text-sky-400 border-sky-500/20'
+                },
+                baja: {
+                  es: 'Baja', en: 'Cancellation', it: 'Cancellazione', fr: 'Résiliation', de: 'Kündigung', pt: 'Cancelamento',
+                  className: 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                },
+                pago_fallido: {
+                  es: 'Pago fallido', en: 'Payment failed', it: 'Pagamento fallito', fr: 'Paiement échoué', de: 'Zahlung fehlgeschlagen', pt: 'Pagamento falhado',
+                  className: 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                }
+              };
+              const formatDateTime = (d) => {
+                if (!d?.seconds) return '—';
+                return new Date(d.seconds * 1000).toLocaleDateString(
+                  language === 'es' ? 'es-ES' : language === 'en' ? 'en-US' : language === 'it' ? 'it-IT' : language === 'fr' ? 'fr-FR' : language === 'de' ? 'de-DE' : 'pt-PT',
+                  { day: '2-digit', month: 'short', year: 'numeric' }
+                );
+              };
+              return (
+              <div className="bg-zinc-900/80 p-6 rounded-3xl border border-zinc-800 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-white text-sm">
+                      {language === 'es' ? 'Mis Pagos' : language === 'en' ? 'My Payments' : language === 'it' ? 'I Miei Pagamenti' : language === 'fr' ? 'Mes Paiements' : language === 'de' ? 'Meine Zahlungen' : 'Os Meus Pagamentos'}
+                    </h3>
+                    <p className="text-xs text-zinc-500">
+                      {language === 'es'
+                        ? 'Historial de tu facturación en MyGarageOps.'
+                        : language === 'en'
+                        ? 'Your billing history on MyGarageOps.'
+                        : language === 'it'
+                        ? 'La cronologia di fatturazione su MyGarageOps.'
+                        : language === 'fr'
+                        ? "Votre historique de facturation sur MyGarageOps."
+                        : language === 'de'
+                        ? 'Dein Abrechnungsverlauf auf MyGarageOps.'
+                        : 'O teu histórico de faturação no MyGarageOps.'}
+                    </p>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-left text-zinc-500 border-b border-zinc-800">
+                        <th className="pb-2 pr-3 font-medium">{language === 'es' ? 'Fecha' : language === 'en' ? 'Date' : language === 'it' ? 'Data' : language === 'fr' ? 'Date' : language === 'de' ? 'Datum' : 'Data'}</th>
+                        <th className="pb-2 pr-3 font-medium">{language === 'es' ? 'Evento' : language === 'en' ? 'Event' : language === 'it' ? 'Evento' : language === 'fr' ? 'Événement' : language === 'de' ? 'Ereignis' : 'Evento'}</th>
+                        <th className="pb-2 pr-3 font-medium">{language === 'es' ? 'Plan' : language === 'en' ? 'Plan' : language === 'it' ? 'Piano' : language === 'fr' ? 'Plan' : language === 'de' ? 'Plan' : 'Plano'}</th>
+                        <th className="pb-2 pr-3 font-medium">{language === 'es' ? 'Importe' : language === 'en' ? 'Amount' : language === 'it' ? 'Importo' : language === 'fr' ? 'Montant' : language === 'de' ? 'Betrag' : 'Montante'}</th>
+                        <th className="pb-2 font-medium">{language === 'es' ? 'Recibo' : language === 'en' ? 'Receipt' : language === 'it' ? 'Ricevuta' : language === 'fr' ? 'Reçu' : language === 'de' ? 'Beleg' : 'Recibo'}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {myTransactions.map(tx => {
+                        const typeInfo = MY_TX_TYPE_LABELS[tx.type];
+                        return (
+                          <tr key={tx.id} className="border-b border-zinc-800/60">
+                            <td className="py-2.5 pr-3 text-zinc-400 font-mono whitespace-nowrap">{formatDateTime(tx.createdAt)}</td>
+                            <td className="py-2.5 pr-3">
+                              <span className={`px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold border ${typeInfo?.className || 'bg-zinc-800 text-zinc-400 border-zinc-700'}`}>
+                                {typeInfo?.[language] || typeInfo?.es || tx.type}
+                              </span>
+                            </td>
+                            <td className="py-2.5 pr-3 text-zinc-300">{tx.planName || '—'}</td>
+                            <td className="py-2.5 pr-3 text-zinc-200 font-mono">{tx.amount != null ? `${tx.amount.toFixed(2)} ${(tx.currency || 'eur').toUpperCase()}` : '—'}</td>
+                            <td className="py-2.5">
+                              {tx.hostedInvoiceUrl ? (
+                                <a
+                                  href={tx.hostedInvoiceUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 text-orange-400 hover:text-orange-300 font-bold"
+                                >
+                                  {language === 'es' ? 'Ver' : language === 'en' ? 'View' : language === 'it' ? 'Vedi' : language === 'fr' ? 'Voir' : language === 'de' ? 'Ansehen' : 'Ver'} <ArrowUpRight className="w-3 h-3" />
+                                </a>
+                              ) : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              );
+            })()}
 
             {/* SECTOR: COPIAS DE SEGURIDAD & EXPORTACIÓN/IMPORTACIÓN JSON Y CSV */}
             <div className="bg-zinc-900/80 p-6 rounded-3xl border border-zinc-800 space-y-4">
@@ -3194,6 +3500,14 @@ export function App() {
               >
                 <Zap className="w-3.5 h-3.5" /> Planes
               </button>
+              <button
+                onClick={() => setAdminSubTab('transactions')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  adminSubTab === 'transactions' ? 'bg-orange-500 text-white shadow' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" /> Transacciones
+              </button>
             </div>
 
             {/* DIRECTORIO DE USUARIOS — Listado limpio, clickable */}
@@ -3294,10 +3608,13 @@ export function App() {
                     <p className="text-xs text-zinc-400 mt-0.5">Configura nombres, precios y límites de vehículos.</p>
                   </div>
                   <button
-                    onClick={() => setEditingPlan({
-                      name: '', tagline: '', priceMonthly: 0, priceAnnual: 0, maxVehicles: 2, unlimited: false,
-                      badgeColor: 'zinc', highlight: false, featuresText: '', isDefaultSignup: false, active: true
-                    })}
+                    onClick={() => {
+                      setPlanEditLang('es');
+                      setEditingPlan({
+                        name: '', priceMonthly: 0, priceAnnual: 0, maxVehicles: 2, unlimited: false,
+                        badgeColor: 'zinc', highlight: false, taglineByLang: {}, featuresTextByLang: {}, isDefaultSignup: false, active: true
+                      });
+                    }}
                     className="px-3.5 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold transition-all flex items-center gap-1.5 shrink-0"
                   >
                     <Plus className="w-3.5 h-3.5" /> Crear Plan
@@ -3334,11 +3651,21 @@ export function App() {
                         <div className="text-[11px] text-zinc-500 font-mono">{usersOnPlan} usuario{usersOnPlan !== 1 ? 's' : ''} en este plan</div>
                         <div className="flex items-center gap-2 pt-1 flex-wrap">
                           <button
-                            onClick={() => setEditingPlan({
-                              ...plan,
-                              featuresText: (plan.features || []).join('\n'),
-                              unlimited: plan.maxVehicles === -1
-                            })}
+                            onClick={() => {
+                              setPlanEditLang('es');
+                              const taglineByLang = {};
+                              const featuresTextByLang = {};
+                              for (const lang of PLAN_LANGUAGES) {
+                                taglineByLang[lang] = getLocalizedPlanText(plan.tagline, lang);
+                                featuresTextByLang[lang] = getLocalizedPlanList(plan.features, lang).join('\n');
+                              }
+                              setEditingPlan({
+                                ...plan,
+                                taglineByLang,
+                                featuresTextByLang,
+                                unlimited: plan.maxVehicles === -1
+                              });
+                            }}
                             className="flex-1 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
                           >
                             <Edit2 className="w-3.5 h-3.5" /> Editar
@@ -3390,6 +3717,130 @@ export function App() {
                     );
                   })}
                 </div>
+              </div>
+              );
+            })()}
+
+            {/* HISTÓRICO DE TRANSACCIONES DE STRIPE — altas, modificaciones y bajas de suscripción */}
+            {adminSubTab === 'transactions' && (() => {
+              const TX_TYPE_LABELS = {
+                alta: { label: 'Alta', className: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
+                pago: { label: 'Pago', className: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
+                modificacion: { label: 'Modificación', className: 'bg-sky-500/10 text-sky-400 border-sky-500/20' },
+                baja: { label: 'Baja', className: 'bg-rose-500/10 text-rose-400 border-rose-500/20' },
+                pago_fallido: { label: 'Pago fallido', className: 'bg-amber-500/10 text-amber-400 border-amber-500/20' }
+              };
+              const CANCELLATION_REASON_LABELS = {
+                cancellation_requested: 'Cancelado por el cliente',
+                payment_disputed: 'Pago disputado',
+                payment_failed: 'Pago fallido'
+              };
+              const filteredTransactions = transactions
+                .filter(tx => transactionTypeFilter === 'all' || tx.type === transactionTypeFilter)
+                .filter(tx => (tx.email || '').toLowerCase().includes(transactionSearch.toLowerCase()));
+              const formatDateTime = (d) => {
+                if (!d?.seconds) return '—';
+                return new Date(d.seconds * 1000).toLocaleString('es-ES', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+              };
+              return (
+              <div className="bg-zinc-900/80 p-6 rounded-3xl border border-zinc-800 space-y-4 shadow-xl">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-zinc-800">
+                  <div>
+                    <h3 className="font-bold text-base text-white flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-orange-400" />
+                      <span>Transacciones ({filteredTransactions.length})</span>
+                    </h3>
+                    <p className="text-xs text-zinc-400 mt-0.5">Altas, modificaciones y bajas de suscripción sincronizadas desde Stripe.</p>
+                  </div>
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <div className="relative flex-1 sm:w-64">
+                      <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="Buscar por email..."
+                        value={transactionSearch}
+                        onChange={(e) => setTransactionSearch(e.target.value)}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-zinc-200 outline-none focus:border-orange-500"
+                      />
+                    </div>
+                    <select
+                      value={transactionTypeFilter}
+                      onChange={(e) => setTransactionTypeFilter(e.target.value)}
+                      className="bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-1.5 text-xs text-zinc-200 outline-none focus:border-orange-500 shrink-0"
+                    >
+                      <option value="all">Todos los eventos</option>
+                      <option value="alta">Altas</option>
+                      <option value="pago">Pagos</option>
+                      <option value="modificacion">Modificaciones</option>
+                      <option value="baja">Bajas</option>
+                      <option value="pago_fallido">Pagos fallidos</option>
+                    </select>
+                  </div>
+                </div>
+
+                {filteredTransactions.length === 0 ? (
+                  <p className="text-xs text-zinc-500 text-center py-8">No hay transacciones registradas todavía.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-zinc-500 border-b border-zinc-800">
+                          <th className="pb-2 pr-3 font-medium">Fecha</th>
+                          <th className="pb-2 pr-3 font-medium">Usuario</th>
+                          <th className="pb-2 pr-3 font-medium">Evento</th>
+                          <th className="pb-2 pr-3 font-medium">Plan</th>
+                          <th className="pb-2 pr-3 font-medium">Importe</th>
+                          <th className="pb-2 pr-3 font-medium">Método</th>
+                          <th className="pb-2 pr-3 font-medium">Estado</th>
+                          <th className="pb-2 font-medium">Recibo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredTransactions.map(tx => {
+                          const typeInfo = TX_TYPE_LABELS[tx.type] || { label: tx.type || '—', className: 'bg-zinc-800 text-zinc-400 border-zinc-700' };
+                          const previousPlanName = tx.previousPlanId ? (plansById[tx.previousPlanId]?.name || tx.previousPlanId) : null;
+                          return (
+                            <tr key={tx.id} className="border-b border-zinc-800/60 hover:bg-zinc-950/50">
+                              <td className="py-2.5 pr-3 text-zinc-400 font-mono whitespace-nowrap">{formatDateTime(tx.createdAt)}</td>
+                              <td className="py-2.5 pr-3 text-zinc-200 truncate max-w-[200px]">{tx.email || tx.uid}</td>
+                              <td className="py-2.5 pr-3">
+                                <span className={`px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold border ${typeInfo.className}`}>{typeInfo.label}</span>
+                              </td>
+                              <td className="py-2.5 pr-3 text-zinc-300">
+                                {previousPlanName && <span className="text-zinc-500">{previousPlanName} → </span>}
+                                {tx.planName || tx.planId || '—'}{tx.billingCycle ? ` (${tx.billingCycle === 'annual' ? 'anual' : 'mensual'})` : ''}
+                              </td>
+                              <td className="py-2.5 pr-3 text-zinc-200 font-mono">{tx.amount != null ? `${tx.amount.toFixed(2)} ${(tx.currency || 'eur').toUpperCase()}` : '—'}</td>
+                              <td className="py-2.5 pr-3 text-zinc-400 font-mono whitespace-nowrap">
+                                {tx.cardBrand ? `${tx.cardBrand.toUpperCase()} •••• ${tx.cardLast4}` : '—'}
+                              </td>
+                              <td className="py-2.5 pr-3 text-zinc-400 font-mono">
+                                {tx.status || '—'}
+                                {tx.cancellationReason && (
+                                  <div className="text-[10px] text-zinc-500 font-sans mt-0.5">
+                                    {CANCELLATION_REASON_LABELS[tx.cancellationReason] || tx.cancellationReason}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="py-2.5">
+                                {tx.hostedInvoiceUrl ? (
+                                  <a
+                                    href={tx.hostedInvoiceUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center gap-1 text-orange-400 hover:text-orange-300 font-bold"
+                                  >
+                                    Ver <ArrowUpRight className="w-3 h-3" />
+                                  </a>
+                                ) : '—'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
               );
             })()}
@@ -3654,7 +4105,7 @@ export function App() {
                     >
                       {plans.filter(p => p.priceMonthly > 0 && p.active !== false).map(p => (
                         <option key={p.id} value={p.id}>
-                          {p.name} ({p.maxVehicles === -1 ? (language === 'es' ? 'Vehículos Ilimitados' : 'Unlimited Vehicles') : `${language === 'es' ? 'Hasta' : 'Up to'} ${p.maxVehicles} ${t('vehicles')}`})
+                          {p.name} ({p.maxVehicles === -1 ? (language === 'es' ? 'Vehículos Ilimitados' : language === 'en' ? 'Unlimited Vehicles' : language === 'it' ? 'Veicoli Illimitati' : language === 'fr' ? 'Véhicules Illimités' : language === 'de' ? 'Unbegrenzte Fahrzeuge' : 'Veículos Ilimitados') : `${language === 'es' ? 'Hasta' : language === 'en' ? 'Up to' : language === 'it' ? 'Fino a' : language === 'fr' ? "Jusqu'à" : language === 'de' ? 'Bis zu' : 'Até'} ${p.maxVehicles} ${t('vehicles')}`})
                         </option>
                       ))}
                     </select>
@@ -4067,10 +4518,10 @@ export function App() {
             <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
               <div>
                 <h3 className="font-bold text-base text-white">
-                  {editingVehicleId ? (language === 'es' ? 'Editar Vehículo' : 'Edit Vehicle') : (language === 'es' ? 'Añadir Nuevo Vehículo' : 'Add New Vehicle')}
+                  {editingVehicleId ? (language === 'es' ? 'Editar Vehículo' : language === 'en' ? 'Edit Vehicle' : language === 'it' ? 'Modifica Veicolo' : language === 'fr' ? 'Modifier le Véhicule' : language === 'de' ? 'Fahrzeug Bearbeiten' : 'Editar Veículo') : (language === 'es' ? 'Añadir Nuevo Vehículo' : language === 'en' ? 'Add New Vehicle' : language === 'it' ? 'Aggiungi Nuovo Veicolo' : language === 'fr' ? 'Ajouter un Nouveau Véhicule' : language === 'de' ? 'Neues Fahrzeug Hinzufügen' : 'Adicionar Novo Veículo')}
                 </h3>
                 <p className="text-xs text-zinc-400">
-                  {editingVehicleId ? (language === 'es' ? 'Modifica los datos del vehículo' : 'Edit vehicle information') : (language === 'es' ? 'Registra una nueva moto, vehículo o máquina en tu garaje.' : 'Register a new bike, car or machine.')}
+                  {editingVehicleId ? (language === 'es' ? 'Modifica los datos del vehículo' : language === 'en' ? 'Edit vehicle information' : language === 'it' ? 'Modifica i dati del veicolo' : language === 'fr' ? 'Modifiez les données du véhicule' : language === 'de' ? 'Fahrzeugdaten bearbeiten' : 'Edita os dados do veículo') : (language === 'es' ? 'Registra una nueva moto, vehículo o máquina en tu garaje.' : language === 'en' ? 'Register a new bike, car or machine.' : language === 'it' ? 'Registra una nuova moto, auto o macchina nel tuo garage.' : language === 'fr' ? 'Enregistrez une nouvelle moto, voiture ou machine dans votre garage.' : language === 'de' ? 'Registriere ein neues Motorrad, Auto oder Gerät in deiner Garage.' : 'Regista uma nova mota, carro ou máquina na tua garagem.')}
                 </p>
               </div>
               <button onClick={() => { setShowAddVehicleModal(false); setEditingVehicleId(null); }} className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center font-bold text-sm">✕</button>
@@ -4160,7 +4611,7 @@ export function App() {
 
               <div>
                 <label className="block text-zinc-400 font-medium mb-1">
-                  {language === 'es' ? `Próxima ${getInspectionLabel(language)} (Opcional)` : `Next ${getInspectionLabel(language)} (Optional)`}
+                  {language === 'es' ? `Próxima ${getInspectionLabel(language)} (Opcional)` : language === 'en' ? `Next ${getInspectionLabel(language)} (Optional)` : language === 'it' ? `Prossima ${getInspectionLabel(language)} (Opzionale)` : language === 'fr' ? `Prochain ${getInspectionLabel(language)} (Optionnel)` : language === 'de' ? `Nächste ${getInspectionLabel(language)} (Optional)` : `Próxima ${getInspectionLabel(language)} (Opcional)`}
                 </label>
                 <input
                   type="date"
@@ -4171,14 +4622,22 @@ export function App() {
                 <p className="text-[10px] text-zinc-500 mt-1">
                   {language === 'es'
                     ? 'Déjalo en blanco si no aplica en tu país o vehículo.'
-                    : 'Leave it blank if this does not apply in your country or vehicle.'}
+                    : language === 'en'
+                    ? 'Leave it blank if this does not apply in your country or vehicle.'
+                    : language === 'it'
+                    ? 'Lascialo vuoto se non si applica al tuo paese o veicolo.'
+                    : language === 'fr'
+                    ? "Laissez vide si cela ne s'applique pas à votre pays ou véhicule."
+                    : language === 'de'
+                    ? 'Lasse es leer, wenn dies in deinem Land oder für dein Fahrzeug nicht zutrifft.'
+                    : 'Deixa em branco se não se aplicar ao teu país ou veículo.'}
                 </p>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-zinc-400 font-medium mb-1">
-                    {language === 'es' ? 'Matrícula (Opcional)' : 'License Plate (Optional)'}
+                    {language === 'es' ? 'Matrícula (Opcional)' : language === 'en' ? 'License Plate (Optional)' : language === 'it' ? 'Targa (Opzionale)' : language === 'fr' ? "Plaque d'Immatriculation (Optionnel)" : language === 'de' ? 'Kennzeichen (Optional)' : 'Matrícula (Opcional)'}
                   </label>
                   <input
                     type="text"
@@ -4190,13 +4649,13 @@ export function App() {
                 </div>
                 <div>
                   <label className="block text-zinc-400 font-medium mb-1">
-                    {language === 'es' ? 'Aseguradora (Opcional)' : 'Insurance Company (Optional)'}
+                    {language === 'es' ? 'Aseguradora (Opcional)' : language === 'en' ? 'Insurance Company (Optional)' : language === 'it' ? 'Compagnia Assicurativa (Opzionale)' : language === 'fr' ? "Compagnie d'Assurance (Optionnel)" : language === 'de' ? 'Versicherung (Optional)' : 'Seguradora (Opcional)'}
                   </label>
                   <input
                     type="text"
                     value={newVehicleForm.insuranceCompany}
                     onChange={(e) => setNewVehicleForm({ ...newVehicleForm, insuranceCompany: e.target.value })}
-                    placeholder={language === 'es' ? 'Ej. Mapfre' : 'e.g. Allstate'}
+                    placeholder={language === 'es' ? 'Ej. Mapfre' : language === 'en' ? 'e.g. Allstate' : language === 'it' ? 'Es. Generali' : language === 'fr' ? 'Ex. AXA' : language === 'de' ? 'Z.B. Allianz' : 'Ex. Fidelidade'}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500"
                   />
                 </div>
@@ -4641,17 +5100,6 @@ export function App() {
                 />
               </div>
 
-              <div>
-                <label className="block text-zinc-400 font-medium mb-1">Frase descriptiva (debajo del nombre)</label>
-                <input
-                  type="text"
-                  value={editingPlan.tagline || ''}
-                  onChange={(e) => setEditingPlan(prev => ({ ...prev, tagline: e.target.value }))}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500"
-                  placeholder="Ej: Perfecto para empezar con tu primer vehículo"
-                />
-              </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-zinc-400 font-medium mb-1">Precio mensual (€)</label>
@@ -4672,6 +5120,31 @@ export function App() {
                   />
                 </div>
               </div>
+
+              {PAYMENT_GATEWAY_ENABLED && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-zinc-400 font-medium mb-1">Stripe Price ID (mensual)</label>
+                    <input
+                      type="text"
+                      value={editingPlan.stripePriceIdMonthly || ''}
+                      onChange={(e) => setEditingPlan(prev => ({ ...prev, stripePriceIdMonthly: e.target.value }))}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-mono"
+                      placeholder="price_..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-zinc-400 font-medium mb-1">Stripe Price ID (anual)</label>
+                    <input
+                      type="text"
+                      value={editingPlan.stripePriceIdAnnual || ''}
+                      onChange={(e) => setEditingPlan(prev => ({ ...prev, stripePriceIdAnnual: e.target.value }))}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-mono"
+                      placeholder="price_..."
+                    />
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="flex items-center gap-2 text-zinc-400 font-medium mb-1">
@@ -4712,14 +5185,48 @@ export function App() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-zinc-400 font-medium mb-1">Características (una por línea)</label>
+              <div className="space-y-2 border-t border-zinc-800 pt-3">
+                <label className="block text-zinc-400 font-medium">Traducciones (frase descriptiva y características)</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {PLAN_LANGUAGES.map(lang => {
+                    const hasContent = !!(editingPlan.taglineByLang?.[lang]?.trim() || editingPlan.featuresTextByLang?.[lang]?.trim());
+                    return (
+                      <button
+                        key={lang}
+                        type="button"
+                        onClick={() => setPlanEditLang(lang)}
+                        className={`px-2.5 py-1 rounded-lg border text-[10px] font-mono font-bold uppercase transition-all ${
+                          planEditLang === lang
+                            ? 'bg-orange-500/10 border-orange-500 text-orange-400'
+                            : `border-zinc-800 hover:border-zinc-700 ${hasContent ? 'text-zinc-300' : 'text-zinc-600'}`
+                        }`}
+                      >
+                        {lang}{!hasContent && ' ○'}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <input
+                  type="text"
+                  value={editingPlan.taglineByLang?.[planEditLang] || ''}
+                  onChange={(e) => setEditingPlan(prev => ({
+                    ...prev,
+                    taglineByLang: { ...prev.taglineByLang, [planEditLang]: e.target.value }
+                  }))}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500"
+                  placeholder="Frase descriptiva, debajo del nombre"
+                />
+
                 <textarea
-                  value={editingPlan.featuresText}
-                  onChange={(e) => setEditingPlan(prev => ({ ...prev, featuresText: e.target.value }))}
+                  value={editingPlan.featuresTextByLang?.[planEditLang] || ''}
+                  onChange={(e) => setEditingPlan(prev => ({
+                    ...prev,
+                    featuresTextByLang: { ...prev.featuresTextByLang, [planEditLang]: e.target.value }
+                  }))}
                   rows={4}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-medium resize-none"
-                  placeholder={'Alertas de mantenimiento\nGestión de repuestos\nSoporte prioritario'}
+                  placeholder={'Características (una por línea)\nAlertas de mantenimiento\nGestión de repuestos\nSoporte prioritario'}
                 />
               </div>
 
@@ -4877,11 +5384,94 @@ export function App() {
         </div>
       )}
 
+      {/* BOTÓN FLOTANTE DE AYUDA: reabre el tour de bienvenida cuando se quiera */}
+      <button
+        type="button"
+        onClick={() => { setOnboardingStep(0); setShowOnboarding(true); }}
+        aria-label={t('onboardingHelpAria')}
+        title={t('onboardingHelpAria')}
+        className="fixed bottom-24 md:bottom-6 right-4 md:right-6 w-12 h-12 rounded-full bg-zinc-900 border border-zinc-700 text-orange-400 hover:text-white hover:bg-orange-500 hover:border-orange-500 shadow-2xl shadow-black/40 flex items-center justify-center transition-all active:scale-95 z-40"
+      >
+        <HelpCircle className="w-5 h-5" />
+      </button>
+
+      {/* TOUR DE BIENVENIDA: aparece solo la primera vez (o al pulsar el botón de ayuda) */}
+      {showOnboarding && (
+        <OnboardingTour step={onboardingStep} setStep={setOnboardingStep} onClose={closeOnboarding} t={t} />
+      )}
+
     </div>
   );
 }
 
 // --- SUBCOMPONENTES AUXILIARES CON DISEÑO MEJORADO ---
+
+function OnboardingTour({ step, setStep, onClose, t }) {
+  const slides = [
+    { icon: Sparkles, title: t('onboardingWelcomeTitle'), body: t('onboardingWelcomeBody') },
+    { icon: Bike, title: t('onboardingGarageTitle'), body: t('onboardingGarageBody') },
+    { icon: AlertTriangle, title: t('onboardingAlertsTitle'), body: t('onboardingAlertsBody') },
+    { icon: Wrench, title: t('onboardingPartsTitle'), body: t('onboardingPartsBody') },
+    { icon: History, title: t('onboardingHistoryTitle'), body: t('onboardingHistoryBody') },
+  ];
+  const isLast = step === slides.length - 1;
+  const current = slides[step];
+
+  return (
+    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[60] flex items-center justify-center p-4">
+      <div className="w-full max-w-sm bg-zinc-900 rounded-3xl border border-zinc-800 p-6 shadow-2xl animate-in zoom-in-95 duration-150 relative">
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute top-4 right-4 w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center transition-colors"
+        >
+          <X className="w-4 h-4" />
+        </button>
+
+        <div className="w-14 h-14 rounded-2xl bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400 mb-5">
+          <current.icon className="w-7 h-7 stroke-[1.75]" />
+        </div>
+
+        <h3 className="text-lg font-extrabold text-white tracking-tight mb-2">{current.title}</h3>
+        <p className="text-sm text-zinc-400 leading-relaxed mb-6">{current.body}</p>
+
+        <div className="flex items-center justify-center gap-1.5 mb-6">
+          {slides.map((_, i) => (
+            <span key={i} className={`h-1.5 rounded-full transition-all ${i === step ? 'w-6 bg-orange-500' : 'w-1.5 bg-zinc-700'}`} />
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {step > 0 ? (
+            <button
+              type="button"
+              onClick={() => setStep(s => s - 1)}
+              className="flex-1 py-2.5 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" /> {t('onboardingBack')}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-2.5 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs transition-all active:scale-95"
+            >
+              {t('onboardingSkip')}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => (isLast ? onClose() : setStep(s => s + 1))}
+            className="flex-1 py-2.5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-orange-500/25 transition-all active:scale-95"
+          >
+            {isLast ? t('onboardingFinish') : t('onboardingNext')}
+            {!isLast && <ArrowRight className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function NavItem({ icon: Icon, label, badge, active, onClick }) {
   return (
@@ -4978,7 +5568,7 @@ function VehicleBentoCard({ vehicle, maintenances = [], language = 'es', onSelec
         <div className="bg-zinc-950/60 p-3 rounded-2xl border border-zinc-800/60 flex items-center justify-between mb-3">
           <div>
             <span className="text-[10px] text-zinc-500 font-medium block">
-              {language === 'es' ? 'Lectura / Gasto' : language === 'en' ? 'Usage / Cost' : 'Lettura / Spesa'}
+              {language === 'es' ? 'Lectura / Gasto' : language === 'en' ? 'Usage / Cost' : language === 'it' ? 'Lettura / Spesa' : language === 'fr' ? 'Relevé / Coût' : language === 'de' ? 'Stand / Kosten' : 'Leitura / Custo'}
             </span>
             <div className="flex items-center gap-2">
               <span className="text-xs font-mono font-bold text-orange-400">{vehicle.usage}</span>
@@ -4990,14 +5580,14 @@ function VehicleBentoCard({ vehicle, maintenances = [], language = 'es', onSelec
             onClick={onOpenKmModal}
             className="px-2.5 py-1 rounded-xl bg-zinc-800 hover:bg-orange-500 hover:text-white text-zinc-300 text-[10px] font-semibold transition-colors border border-zinc-700/60"
           >
-            + {language === 'es' ? 'Actualizar' : language === 'en' ? 'Update' : 'Aggiorna'}
+            + {language === 'es' ? 'Actualizar' : language === 'en' ? 'Update' : language === 'it' ? 'Aggiorna' : language === 'fr' ? 'Mettre à jour' : language === 'de' ? 'Aktualisieren' : 'Atualizar'}
           </button>
         </div>
       </div>
 
       <div className="pt-3 border-t border-zinc-800/60 flex items-center justify-between text-[11px]">
         <span className="text-[10px] text-zinc-500 font-medium">
-          {language === 'es' ? 'Estado:' : language === 'en' ? 'Status:' : 'Stato:'}
+          {language === 'es' ? 'Estado:' : language === 'en' ? 'Status:' : language === 'it' ? 'Stato:' : language === 'fr' ? 'Statut :' : language === 'de' ? 'Status:' : 'Estado:'}
         </span>
         <span className={`px-2.5 py-0.5 rounded-full font-bold text-[10px] border ${
           vehicle.status === 'ok' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
@@ -5018,8 +5608,8 @@ function VehicleBentoCard({ vehicle, maintenances = [], language = 'es', onSelec
           <span>
             {getInspectionLabel(language)}:{' '}
             {inspection.days < 0
-              ? (language === 'es' ? `venció hace ${Math.abs(inspection.days)} días` : language === 'en' ? `overdue by ${Math.abs(inspection.days)} days` : `scaduta da ${Math.abs(inspection.days)} giorni`)
-              : (language === 'es' ? `en ${inspection.days} días` : language === 'en' ? `in ${inspection.days} days` : `tra ${inspection.days} giorni`)}
+              ? (language === 'es' ? `venció hace ${Math.abs(inspection.days)} días` : language === 'en' ? `overdue by ${Math.abs(inspection.days)} days` : language === 'it' ? `scaduta da ${Math.abs(inspection.days)} giorni` : language === 'fr' ? `en retard de ${Math.abs(inspection.days)} jours` : language === 'de' ? `seit ${Math.abs(inspection.days)} Tagen überfällig` : `venceu há ${Math.abs(inspection.days)} dias`)
+              : (language === 'es' ? `en ${inspection.days} días` : language === 'en' ? `in ${inspection.days} days` : language === 'it' ? `tra ${inspection.days} giorni` : language === 'fr' ? `dans ${inspection.days} jours` : language === 'de' ? `in ${inspection.days} Tagen` : `em ${inspection.days} dias`)}
           </span>
         </div>
       )}

@@ -59,5 +59,13 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+
+    // Reglas para transactions (histórico de eventos de facturación de Stripe).
+    // Solo el webhook (Admin SDK, que ignora estas reglas) escribe. En lectura: los admins ven todo
+    // desde el Backoffice, y cada usuario puede ver únicamente sus propias transacciones.
+    match /transactions/{transactionId} {
+      allow read: if request.auth != null && (resource.data.uid == request.auth.uid || isAdmin());
+      allow write: if false;
+    }
   }
 }
