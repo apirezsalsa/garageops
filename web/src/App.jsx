@@ -61,6 +61,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { TRANSLATIONS, translateCategory } from './locales';
+import { computePlanStats } from './utils/billing';
 
 // Paleta fija de colores de badge para planes (Tailwind purga clases que no puede detectar
 // estáticamente, así que no se puede construir el nombre de la clase a partir de datos dinámicos).
@@ -3229,6 +3230,25 @@ export function App() {
                 })}
               </div>
 
+              {/* Aviso legal requerido por la normativa de consumidores de la UE: al contratar un plan de pago,
+                  el usuario acepta el inicio inmediato del servicio digital y renuncia al derecho de
+                  desistimiento de 14 días en la parte ya disfrutada (ver Términos y Condiciones, punto 4). */}
+              {PAYMENT_GATEWAY_ENABLED && (
+                <p className="text-[11px] text-zinc-500 pt-1">
+                  {language === 'es'
+                    ? <>Al contratar un plan de pago aceptas los <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Términos y Condiciones</a> y la <a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Política de Privacidad</a>, incluido el inicio inmediato del servicio y la renuncia al derecho de desistimiento de 14 días una vez accedas al plan.</>
+                    : language === 'en'
+                    ? <>By subscribing to a paid plan you accept the <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Terms and Conditions</a> and <a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Privacy Policy</a>, including immediate service start and waiver of the 14-day withdrawal right once you access the plan.</>
+                    : language === 'it'
+                    ? <>Sottoscrivendo un piano a pagamento accetti i <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Termini e Condizioni</a> e l'<a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Informativa sulla Privacy</a>, incluso l'avvio immediato del servizio e la rinuncia al diritto di recesso di 14 giorni una volta effettuato l'accesso al piano.</>
+                    : language === 'fr'
+                    ? <>En souscrivant à un plan payant, vous acceptez les <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Conditions Générales</a> et la <a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Politique de Confidentialité</a>, y compris le démarrage immédiat du service et la renonciation au droit de rétractation de 14 jours dès l'accès au plan.</>
+                    : language === 'de'
+                    ? <>Mit dem Abschluss eines kostenpflichtigen Plans akzeptierst du die <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Allgemeinen Geschäftsbedingungen</a> und die <a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Datenschutzerklärung</a>, einschließlich des sofortigen Diensteginns und des Verzichts auf das 14-tägige Widerrufsrecht nach Zugriff auf den Plan.</>
+                    : <>Ao subscrever um plano pago aceitas os <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Termos e Condições</a> e a <a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Política de Privacidade</a>, incluindo o início imediato do serviço e a renúncia ao direito de resolução de 14 dias assim que acederes ao plano.</>}
+                </p>
+              )}
+
               {/* El acceso a facturas y su descarga en PDF se hace desde el botón "Gestionar suscripción" de
                   arriba, que abre el Portal de Facturación real de Stripe (incluye historial de facturas). */}
               {PAYMENT_GATEWAY_ENABLED && !userProfile?.stripeCustomerId && (
@@ -3394,15 +3414,8 @@ export function App() {
         {activeTab === 'admin' && isSuperAdmin && (() => {
           const totalVehicles = Object.values(vehicleCountsByUser).reduce((a, b) => a + b, 0);
           const avgVehicles = allUsersList.length > 0 ? (totalVehicles / allUsersList.length).toFixed(1) : 0;
-          const paidUsers = allUsersList.filter(u => u.role !== 'admin' && !(u.giftDays > 0) && (plansById[u.plan]?.priceMonthly > 0)).length;
-          const freeUsers = allUsersList.filter(u => u.role !== 'admin' && (u.giftDays > 0 || !(plansById[u.plan]?.priceMonthly > 0))).length;
           const adminUsersCount = allUsersList.filter(u => u.role === 'admin').length;
-          const conversionRate = allUsersList.length > 0 ? Math.round((paidUsers / allUsersList.length) * 100) : 0;
-          // Un Pase Regalo (giftDays > 0) da acceso a un plan de pago sin cobro real, así que no cuenta como ingreso
-          const mrr = allUsersList.reduce((sum, u) => {
-            if (u.role === 'admin' || u.giftDays > 0) return sum;
-            return sum + (plansById[u.plan]?.priceMonthly || 0);
-          }, 0);
+          const { paidUsers, freeUsers, conversionRate, mrr } = computePlanStats(allUsersList, plansById);
 
           const formatDateShort = (d) => {
             if (!d) return '—';

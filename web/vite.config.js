@@ -7,4 +7,16 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        // Separa las librerías de terceros (que cambian poco) del código propio (que cambia en cada deploy),
+        // así el navegador de los usuarios recurrentes no tiene que volver a descargar React/Firebase entero.
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/functions'],
+        },
+      },
+    },
+  },
 });
