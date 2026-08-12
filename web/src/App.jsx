@@ -95,7 +95,7 @@ const getLocalizedPlanList = (value, language) => {
 
 // Mientras no haya pasarela de pago real integrada, los usuarios no pueden autoasignarse un plan de pago:
 // solo pueden quedarse en un plan gratuito o pedir a un admin que se lo otorgue desde el Backoffice.
-const PAYMENT_GATEWAY_ENABLED = false;
+const PAYMENT_GATEWAY_ENABLED = true;
 
 // Planes de siembra inicial (se escriben una sola vez en Firestore si la colección 'plans' está vacía)
 const SEED_PLANS = [
@@ -3394,12 +3394,13 @@ export function App() {
         {activeTab === 'admin' && isSuperAdmin && (() => {
           const totalVehicles = Object.values(vehicleCountsByUser).reduce((a, b) => a + b, 0);
           const avgVehicles = allUsersList.length > 0 ? (totalVehicles / allUsersList.length).toFixed(1) : 0;
-          const paidUsers = allUsersList.filter(u => u.role !== 'admin' && (plansById[u.plan]?.priceMonthly > 0)).length;
-          const freeUsers = allUsersList.filter(u => u.role !== 'admin' && !(plansById[u.plan]?.priceMonthly > 0)).length;
+          const paidUsers = allUsersList.filter(u => u.role !== 'admin' && !(u.giftDays > 0) && (plansById[u.plan]?.priceMonthly > 0)).length;
+          const freeUsers = allUsersList.filter(u => u.role !== 'admin' && (u.giftDays > 0 || !(plansById[u.plan]?.priceMonthly > 0))).length;
           const adminUsersCount = allUsersList.filter(u => u.role === 'admin').length;
           const conversionRate = allUsersList.length > 0 ? Math.round((paidUsers / allUsersList.length) * 100) : 0;
+          // Un Pase Regalo (giftDays > 0) da acceso a un plan de pago sin cobro real, así que no cuenta como ingreso
           const mrr = allUsersList.reduce((sum, u) => {
-            if (u.role === 'admin') return sum;
+            if (u.role === 'admin' || u.giftDays > 0) return sum;
             return sum + (plansById[u.plan]?.priceMonthly || 0);
           }, 0);
 
