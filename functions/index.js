@@ -5,6 +5,7 @@ import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
 import { logger } from 'firebase-functions';
 import Stripe from 'stripe';
+import { matchPlanByPriceId, pickFallbackFreePlanId } from './src/planMatching.js';
 
 initializeApp();
 const db = getFirestore();
@@ -20,22 +21,20 @@ function getStripe(secretKey) {
   return new Stripe(secretKey, { apiVersion: '2024-11-20.acacia' });
 }
 
+async function fetchPlans() {
+  const snap = await db.collection('plans').get();
+  return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
+
 // Encuentra el plan de Firestore cuyo Price ID (mensual o anual) coincide con el recibido de Stripe
 async function findPlanByStripePriceId(priceId) {
-  const snap = await db.collection('plans').get();
-  for (const doc of snap.docs) {
-    const plan = doc.data();
-    if (plan.stripePriceIdMonthly === priceId) return { id: doc.id, billingCycle: 'monthly', ...plan };
-    if (plan.stripePriceIdAnnual === priceId) return { id: doc.id, billingCycle: 'annual', ...plan };
-  }
-  return null;
+  return matchPlanByPriceId(await fetchPlans(), priceId);
 }
 
 // Plan al que se revierte a un usuario cuando su suscripción de pago termina o se cancela
 async function getFallbackFreePlanId() {
   const snap = await db.collection('plans').where('active', '!=', false).get();
-  const free = snap.docs.find(d => !(d.data().priceMonthly > 0));
-  return free?.id || 'starter';
+  return pickFallbackFreePlanId(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
 }
 
 // Encuentra el uid de Firebase de un cliente de Stripe cuando el evento no trae metadata (p.ej. facturas)
