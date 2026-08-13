@@ -1,4 +1,5 @@
 import { initializeApp } from 'firebase/app';
+import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
@@ -14,6 +15,16 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+
+// App Check (reCAPTCHA v3, clave del sitio registrada en Firebase Console → App Check).
+// De momento sin "enforcement" activado en Firestore/Functions: solo empieza a emitir tokens
+// para poder comprobar en la consola que las peticiones se verifican bien antes de bloquear
+// las que no los lleven.
+initializeAppCheck(app, {
+  provider: new ReCaptchaV3Provider('6LeMLIMtAAAAAEmcUp2aKhobFi7SDZNlJtG7s9DH'),
+  isTokenAutoRefreshEnabled: true,
+});
+
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const functions = getFunctions(app);
