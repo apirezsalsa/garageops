@@ -1819,11 +1819,27 @@ export function App() {
                 </button>
               </div>
 
-              <button 
-                type="submit" 
+              {isRegisterMode && (
+                <p className="text-[11px] text-zinc-500 -mt-1">
+                  {language === 'es'
+                    ? <>Al registrarte aceptas los <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Términos y Condiciones</a> y la <a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Política de Privacidad</a>.</>
+                    : language === 'en'
+                    ? <>By registering you accept the <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Terms and Conditions</a> and <a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Privacy Policy</a>.</>
+                    : language === 'it'
+                    ? <>Registrandoti accetti i <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Termini e Condizioni</a> e l'<a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Informativa sulla Privacy</a>.</>
+                    : language === 'fr'
+                    ? <>En vous inscrivant, vous acceptez les <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Conditions Générales</a> et la <a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Politique de Confidentialité</a>.</>
+                    : language === 'de'
+                    ? <>Mit der Registrierung akzeptierst du die <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Allgemeinen Geschäftsbedingungen</a> und die <a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Datenschutzerklärung</a>.</>
+                    : <>Ao registares-te aceitas os <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Termos e Condições</a> e a <a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Política de Privacidade</a>.</>}
+                </p>
+              )}
+
+              <button
+                type="submit"
                 className="w-full py-3.5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm transition-all shadow-lg shadow-orange-500/25 active:scale-95 mt-2"
               >
-                {isRegisterMode 
+                {isRegisterMode
                   ? (language === 'es' ? 'Registrarse en MyGarageOps' : language === 'en' ? 'Register in MyGarageOps' : language === 'it' ? 'Registrati su MyGarageOps' : language === 'fr' ? "S'inscrire sur MyGarageOps" : language === 'de' ? 'Bei MyGarageOps registrieren' : 'Registar-me no MyGarageOps')
                   : (language === 'es' ? 'Entrar a Mi Garaje' : language === 'en' ? 'Access My Garage' : language === 'it' ? 'Accedi al Mio Garage' : language === 'fr' ? 'Accéder à Mon Garage' : language === 'de' ? 'Zu Meiner Garage' : 'Aceder à Minha Garagem')}
               </button>
@@ -1859,6 +1875,22 @@ export function App() {
               </svg>
               {language === 'es' ? 'Continuar con Apple' : language === 'en' ? 'Continue with Apple' : language === 'it' ? 'Continua con Apple' : language === 'fr' ? 'Continuer avec Apple' : language === 'de' ? 'Mit Apple fortfahren' : 'Continuar com a Apple'}
             </button>
+
+            {/* Google/Apple pueden crear una cuenta nueva en el primer inicio de sesión, así que el aviso
+                legal debe verse aquí también, no solo en el formulario de registro con email. */}
+            <p className="text-[11px] text-zinc-500 text-center -mt-1">
+              {language === 'es'
+                ? <>Si es tu primer acceso, aceptas los <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Términos</a> y la <a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Privacidad</a>.</>
+                : language === 'en'
+                ? <>If this is your first sign-in, you accept the <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Terms</a> and <a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Privacy Policy</a>.</>
+                : language === 'it'
+                ? <>Se è il tuo primo accesso, accetti i <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Termini</a> e la <a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Privacy</a>.</>
+                : language === 'fr'
+                ? <>S'il s'agit de votre première connexion, vous acceptez les <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Conditions</a> et la <a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Confidentialité</a>.</>
+                : language === 'de'
+                ? <>Bei deiner ersten Anmeldung akzeptierst du die <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">AGB</a> und den <a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Datenschutz</a>.</>
+                : <>Se for o teu primeiro acesso, aceitas os <a href="https://mygarageops.com/legal/terminos" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Termos</a> e a <a href="https://mygarageops.com/legal/privacidad" target="_blank" rel="noopener noreferrer" className="text-orange-400 hover:underline">Privacidade</a>.</>}
+            </p>
 
             {/* Alternar Registro / Login */}
             <div className="pt-2 border-t border-zinc-800/80 text-center">
