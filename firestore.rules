@@ -4,7 +4,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function isAdmin() {
       return request.auth != null && (
-        request.auth.token.email.matches('.*apirezsalsa.*') ||
+        request.auth.token.email == 'apirezsalsa@gmail.com' ||
         request.auth.token.email == 'demo@garageops.io' ||
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
       );
@@ -15,11 +15,40 @@ service cloud.firestore {
     // y acceso de lectura/escritura completo a administradores para el Backoffice
     match /users/{userId} {
       allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+
+      // Solo el Admin SDK (Cloud Functions: checkout, webhook, gestión de pases-regalo desde el
+      // Backoffice) puede fijar datos de facturación/suscripción; esas escrituras ignoran estas reglas.
+      // Un usuario normal solo puede crear su propio documento con un plan gratuito (priceMonthly <= 0);
+      // cualquier plan de pago se contrata siempre vía Stripe Checkout, nunca escribiendo Firestore directo.
       allow create: if request.auth != null && request.auth.uid == userId
-        && (request.resource.data.role != 'admin' || isAdmin());
+        && (request.resource.data.role != 'admin' || isAdmin())
+        && !('subscriptionStatus' in request.resource.data)
+        && !('stripeSubscriptionId' in request.resource.data)
+        && !('stripeCustomerId' in request.resource.data)
+        && !('giftDays' in request.resource.data)
+        && (
+          isAdmin()
+          || !('plan' in request.resource.data)
+          || get(/databases/$(database)/documents/plans/$(request.resource.data.plan)).data.priceMonthly <= 0
+        );
+
+      // En actualizaciones, un usuario no puede tocar su propio role ni los campos de facturación
+      // gestionados por el servidor; solo puede cambiar su plan si es para bajarse a uno gratuito
+      // (downgrade programado desde la app). Cualquier otro cambio de estos campos requiere ser admin.
       allow update: if request.auth != null && (
-        (request.auth.uid == userId && request.resource.data.role == resource.data.role) ||
-        isAdmin()
+        isAdmin() ||
+        (
+          request.auth.uid == userId &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.get('subscriptionStatus', null) == resource.data.get('subscriptionStatus', null) &&
+          request.resource.data.get('giftDays', null) == resource.data.get('giftDays', null) &&
+          request.resource.data.get('stripeSubscriptionId', null) == resource.data.get('stripeSubscriptionId', null) &&
+          request.resource.data.get('stripeCustomerId', null) == resource.data.get('stripeCustomerId', null) &&
+          (
+            request.resource.data.plan == resource.data.plan ||
+            get(/databases/$(database)/documents/plans/$(request.resource.data.plan)).data.priceMonthly <= 0
+          )
+        )
       );
       allow delete: if isAdmin();
     }

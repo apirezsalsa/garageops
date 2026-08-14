@@ -286,7 +286,7 @@ export function App() {
 
       if (user) {
         // Garantizar que la cuenta actual existe en la colección de usuarios de Firestore
-        const isApiRez = user.email && user.email.toLowerCase().includes('apirezsalsa');
+        const isApiRez = user.email && user.email.toLowerCase() === 'apirezsalsa@gmail.com';
         const userDocRef = doc(db, 'users', user.uid);
         try {
           const existingSnap = await getDoc(userDocRef);
