@@ -105,6 +105,15 @@ export const createCheckoutSession = onCall({ secrets: [STRIPE_SECRET_KEY] }, as
   const userData = userSnap.data() || {};
 
   let customerId = userData.stripeCustomerId;
+  if (customerId) {
+    // stripeCustomerId es escribible por el propio usuario desde el cliente: verificamos que el
+    // Customer de Stripe realmente le pertenece antes de reutilizarlo, para evitar que alguien
+    // escriba el customerId de otra persona y acceda a su suscripción/facturación.
+    const existing = await stripe.customers.retrieve(customerId);
+    if (existing.deleted || existing.metadata?.firebaseUid !== uid) {
+      customerId = null;
+    }
+  }
   if (!customerId) {
     const customer = await stripe.customers.create({
       email: request.auth.token.email || undefined,
@@ -146,6 +155,14 @@ export const createPortalSession = onCall({ secrets: [STRIPE_SECRET_KEY] }, asyn
   if (!customerId) throw new HttpsError('failed-precondition', 'Este usuario todavía no tiene una suscripción de Stripe.');
 
   const stripe = getStripe(STRIPE_SECRET_KEY.value());
+
+  // stripeCustomerId es escribible por el propio usuario desde el cliente: verificamos que el
+  // Customer de Stripe realmente le pertenece antes de abrirle el Billing Portal de otra persona.
+  const customer = await stripe.customers.retrieve(customerId);
+  if (customer.deleted || customer.metadata?.firebaseUid !== uid) {
+    throw new HttpsError('permission-denied', 'No tienes permiso para acceder a esta suscripción.');
+  }
+
   const session = await stripe.billingPortal.sessions.create({
     customer: customerId,
     return_url: `${APP_URL}/`
