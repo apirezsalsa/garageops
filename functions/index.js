@@ -1,15 +1,19 @@
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
+import { getMessaging } from 'firebase-admin/messaging';
 import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { defineSecret } from 'firebase-functions/params';
 import { logger } from 'firebase-functions';
 import Stripe from 'stripe';
 import { matchPlanByPriceId, pickFallbackFreePlanId } from './src/planMatching.js';
+import { computeDueAlerts, buildNotificationPayload } from './src/alertNotifications.js';
 
 initializeApp();
 const db = getFirestore();
 const auth = getAuth();
+const messaging = getMessaging();
 
 const STRIPE_SECRET_KEY = defineSecret('STRIPE_SECRET_KEY');
 const STRIPE_WEBHOOK_SECRET = defineSecret('STRIPE_WEBHOOK_SECRET');
@@ -385,6 +389,66 @@ export const deleteUserAccount = onCall(async (request) => {
       throw new HttpsError('internal', 'Se borraron los datos pero falló eliminar la cuenta de acceso.');
     }
   }
+
+  return { success: true };
+});
+
+// Envía un push a todos los dispositivos registrados de un usuario y limpia del array `fcmTokens`
+// los tokens que FCM reporta como inválidos/no registrados (dispositivo desinstaló la app, etc.)
+async function sendPushToUser(uid, { title, body }) {
+  const userRef = db.collection('users').doc(uid);
+  const userSnap = await userRef.get();
+  const tokens = userSnap.data()?.fcmTokens || [];
+  if (tokens.length === 0) return;
+
+  const response = await messaging.sendEachForMulticast({
+    tokens,
+    notification: { title, body }
+  });
+
+  const invalidTokens = [];
+  response.responses.forEach((res, i) => {
+    if (!res.success && ['messaging/invalid-registration-token', 'messaging/registration-token-not-registered'].includes(res.error?.code)) {
+      invalidTokens.push(tokens[i]);
+    }
+  });
+  if (invalidTokens.length > 0) {
+    await userRef.update({ fcmTokens: FieldValue.arrayRemove(...invalidTokens) });
+  }
+}
+
+// Programada: revisa cada día las alertas de todos los vehículos y envía un push (una sola vez por
+// alerta) a los que estén vencidas o próximas. Ver functions/src/alertNotifications.js para la lógica.
+export const checkVehicleAlerts = onSchedule({ schedule: 'every day 08:00', timeZone: 'Europe/Madrid' }, async () => {
+  const vehiclesSnap = await db.collection('vehicles').get();
+
+  for (const vehicleDoc of vehiclesSnap.docs) {
+    const vehicle = vehicleDoc.data();
+    const dueAlerts = computeDueAlerts(vehicle);
+    if (dueAlerts.length === 0) continue;
+
+    try {
+      await sendPushToUser(vehicle.userId, buildNotificationPayload(vehicle, dueAlerts));
+
+      const dueIds = new Set(dueAlerts.map((a) => a.id));
+      const updatedAlerts = (vehicle.alerts || []).map((a) => (dueIds.has(a.id) ? { ...a, notified: true } : a));
+      await vehicleDoc.ref.update({ alerts: updatedAlerts });
+    } catch (err) {
+      logger.error(`Error notificando alertas del vehículo ${vehicleDoc.id}`, err);
+    }
+  }
+});
+
+// Callable: envía un push de prueba al usuario autenticado, para verificar de punta a punta que el
+// permiso, el token guardado y el envío desde el backend funcionan, sin esperar al cron diario.
+export const sendTestPushNotification = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Debes iniciar sesión.');
+
+  await sendPushToUser(uid, {
+    title: 'MyGarageOps',
+    body: 'Notificación de prueba: si ves esto, las alertas push funcionan.'
+  });
 
   return { success: true };
 });

@@ -1,16 +1,7 @@
-import { Platform } from 'react-native';
 import { db, auth } from '../config/firebase';
 import { collection, query, where, getDocs, addDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
-import * as webApi from './webApi';
 
 export const addMaintenance = async (vehicleId, maintenanceData) => {
-    if (Platform.OS === 'web') {
-        return webApi.request('maintenance', {
-            method: 'POST',
-            body: JSON.stringify({ ...maintenanceData, vehicle_id: vehicleId })
-        });
-    }
-
     try {
         if (!auth.currentUser) throw new Error('Usuario no autenticado');
 
@@ -29,10 +20,6 @@ export const addMaintenance = async (vehicleId, maintenanceData) => {
 };
 
 export const getMaintenanceHistory = async (vehicleId) => {
-    if (Platform.OS === 'web') {
-        return webApi.request(`maintenance?vehicle_id=${vehicleId}`);
-    }
-
     try {
         if (!auth.currentUser) return [];
 
@@ -62,12 +49,6 @@ export const getMaintenanceHistory = async (vehicleId) => {
 };
 
 export const deleteMaintenance = async (maintenanceId) => {
-    if (Platform.OS === 'web') {
-        return webApi.request(`maintenance/${maintenanceId}`, {
-            method: 'DELETE'
-        });
-    }
-
     try {
         const ref = doc(db, 'maintenances', maintenanceId);
         await deleteDoc(ref);
@@ -78,13 +59,6 @@ export const deleteMaintenance = async (maintenanceId) => {
 };
 
 export const updateMaintenance = async (maintenanceId, updatedData) => {
-    if (Platform.OS === 'web') {
-        return webApi.request(`maintenance/${maintenanceId}`, {
-            method: 'PUT',
-            body: JSON.stringify(updatedData)
-        });
-    }
-
     try {
         const ref = doc(db, 'maintenances', maintenanceId);
         await updateDoc(ref, updatedData);
@@ -95,12 +69,6 @@ export const updateMaintenance = async (maintenanceId, updatedData) => {
 };
 
 export const getAllMaintenances = async (limitCount = 20) => {
-    if (Platform.OS === 'web') {
-        // Handle global search/recent maintenance
-        // In this simple API, we might need a specific endpoint or just fetch all
-        return webApi.request('maintenance/all'); // Assuming I might add this or just rely on vehicle history
-    }
-
     try {
         if (!auth.currentUser) return [];
         const q = query(
@@ -121,7 +89,7 @@ export const getAllMaintenances = async (limitCount = 20) => {
         }
         return allDocs;
     } catch (error) {
-        console.error("Error getting all maintenances:", error);
+        console.error('Error getting all maintenances:', error);
         return [];
     }
 };

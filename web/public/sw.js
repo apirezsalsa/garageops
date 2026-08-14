@@ -1,5 +1,31 @@
 const CACHE_NAME = 'garageops-v2';
 
+// Firebase Cloud Messaging para notificaciones push en segundo plano. Se integra en este mismo
+// service worker (en vez de registrar uno nuevo aparte) porque dos SW con scope raíz "/" se pisarían
+// entre sí y solo controlaría el último registrado, rompiendo el caché de la PWA de arriba.
+importScripts('https://www.gstatic.com/firebasejs/12.16.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/12.16.0/firebase-messaging-compat.js');
+
+firebase.initializeApp({
+  apiKey: "AIzaSyBFI60elQ9espDdquI9tnSipbNFN_lfsxI",
+  authDomain: "garageops-6511f.firebaseapp.com",
+  projectId: "garageops-6511f",
+  storageBucket: "garageops-6511f.firebasestorage.app",
+  messagingSenderId: "1077063710094",
+  appId: "1:1077063710094:web:911bc7f65d9fe43159e0df"
+});
+
+const messaging = firebase.messaging();
+
+messaging.onBackgroundMessage((payload) => {
+  const title = payload.notification?.title || 'MyGarageOps';
+  self.registration.showNotification(title, {
+    body: payload.notification?.body || '',
+    icon: '/logo.png',
+    badge: '/logo.png',
+  });
+});
+
 self.addEventListener('install', () => {
   self.skipWaiting();
 });

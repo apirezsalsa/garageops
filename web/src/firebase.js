@@ -3,6 +3,7 @@ import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
+import { getMessaging, isSupported } from 'firebase/messaging';
 
 // Reutilizamos el mismo proyecto Firebase de la app móvil (garageops-6511f)
 const firebaseConfig = {
@@ -28,3 +29,17 @@ initializeAppCheck(app, {
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const functions = getFunctions(app);
+
+// Clave pública de Web Push (Firebase Console → Configuración del proyecto → Cloud Messaging →
+// "Certificados push web"). No es un secreto, igual que el resto de firebaseConfig.
+export const VAPID_KEY = 'BMbTyphLTrS6LhgZlGB2iZtubi5hhSLC5qQl4tZU5wcpZIKhZH6Fe5TkBuNfLv642R6GoVl_oxbw96KucHbiETc';
+
+// Firebase Messaging no está soportado en todos los navegadores/contextos (p.ej. Safari fuera
+// de una PWA instalada en pantalla de inicio), así que se resuelve de forma perezosa y segura.
+let messagingInstance = null;
+export const getMessagingIfSupported = async () => {
+  if (messagingInstance) return messagingInstance;
+  if (!(await isSupported())) return null;
+  messagingInstance = getMessaging(app);
+  return messagingInstance;
+};

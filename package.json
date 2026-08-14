@@ -6,8 +6,7 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web",
-    "build:web:distrito": "expo export -p web && sed -i '' 's/href=\"\\//href=\"\\.\\//g' dist/index.html && sed -i '' 's/src=\"\\//src=\"\\.\\//g' dist/index.html && rm -rf ../WebDistrito/garageops && cp -r dist ../WebDistrito/garageops"
+    "web": "expo start --web"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { auth, db, functions } from './firebase';
+import { auth, db, functions, getMessagingIfSupported, VAPID_KEY } from './firebase';
+import { getToken, onMessage } from 'firebase/messaging';
 import { httpsCallable } from 'firebase/functions';
 import { 
   onAuthStateChanged, 
@@ -25,7 +26,8 @@ import {
   orderBy,
   limit,
   serverTimestamp,
-  Timestamp
+  Timestamp,
+  arrayUnion
 } from 'firebase/firestore';
 import { 
   Home, 
@@ -56,6 +58,7 @@ import {
   BarChart3,
   Lock,
   HelpCircle,
+  Bell,
   X,
   ArrowLeft,
   ArrowRight
@@ -413,6 +416,58 @@ export function App() {
   const [inspectingUser, setInspectingUser] = useState(null); // usuario siendo inspeccionado en modo soporte
   // uid que realmente debe usarse para leer/escribir datos: el del usuario inspeccionado si hay uno activo, si no el del admin autenticado
   const effectiveUserId = inspectingUser ? inspectingUser.id : firebaseUser?.uid;
+
+  // Estado del permiso de notificaciones push: 'default' | 'granted' | 'denied' | 'unsupported'
+  const [pushPermissionStatus, setPushPermissionStatus] = useState(
+    typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'
+  );
+  const [pushRequestInFlight, setPushRequestInFlight] = useState(false);
+
+  // Escucha pushes que llegan con la app en primer plano (el navegador no muestra el toast del
+  // sistema automáticamente en foreground, así que lo mostramos nosotros vía NoticeModal).
+  useEffect(() => {
+    let unsubscribe;
+    (async () => {
+      const messaging = await getMessagingIfSupported();
+      if (!messaging) return;
+      unsubscribe = onMessage(messaging, (payload) => {
+        setNoticeModal({
+          title: payload.notification?.title || 'MyGarageOps',
+          message: payload.notification?.body || '',
+          type: 'info'
+        });
+      });
+    })();
+    return () => { if (unsubscribe) unsubscribe(); };
+  }, []);
+
+  const handleEnablePushNotifications = async () => {
+    if (typeof Notification === 'undefined') {
+      setPushPermissionStatus('unsupported');
+      return;
+    }
+    setPushRequestInFlight(true);
+    try {
+      const messaging = await getMessagingIfSupported();
+      if (!messaging) {
+        setPushPermissionStatus('unsupported');
+        return;
+      }
+      const permission = await Notification.requestPermission();
+      setPushPermissionStatus(permission);
+      if (permission !== 'granted') return;
+
+      const swRegistration = await navigator.serviceWorker.ready;
+      const token = await getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: swRegistration });
+      if (token && effectiveUserId) {
+        await updateDoc(doc(db, 'users', effectiveUserId), { fcmTokens: arrayUnion(token) });
+      }
+    } catch (err) {
+      console.warn('Error activando notificaciones push:', err);
+    } finally {
+      setPushRequestInFlight(false);
+    }
+  };
 
   // Registra en Firestore quién hizo qué mientras estaba en Modo Inspección (auditoría)
   const logInspectionAction = async (action, colName, docId, data) => {
@@ -1037,67 +1092,65 @@ export function App() {
   // Estado para Modal de Alertas Programadas por Vehículo
   const [showAlertModal, setShowAlertModal] = useState(null); // guarda el vehículo target
   const [newAlertForm, setNewAlertForm] = useState({
+    type: 'usage', // 'usage' (horas/km) o 'date' (fecha concreta)
     title: '',
     targetUsage: '',
-    advanceNotice: '5' // umbral de aviso previo (ej: avisa 5 hrs / 500 km antes)
+    advanceNotice: '5', // umbral de aviso previo (ej: avisa 5 hrs / 500 km antes)
+    targetDate: ''
   });
 
-  const handleAddVehicleAlert = (e) => {
+  const handleAddVehicleAlert = async (e) => {
     e.preventDefault();
-    if (!showAlertModal || !newAlertForm.title || !newAlertForm.targetUsage) return;
+    if (!showAlertModal || !newAlertForm.title) return;
 
-    const targetVal = parseFloat(newAlertForm.targetUsage);
-    const advanceVal = parseFloat(newAlertForm.advanceNotice) || 0;
+    let alertItem;
+    if (newAlertForm.type === 'date') {
+      if (!newAlertForm.targetDate) return;
+      alertItem = {
+        id: Date.now(),
+        type: 'date',
+        title: newAlertForm.title,
+        targetDate: newAlertForm.targetDate
+      };
+    } else {
+      if (!newAlertForm.targetUsage) return;
+      const targetVal = parseFloat(newAlertForm.targetUsage);
+      if (isNaN(targetVal)) return;
+      const advanceVal = parseFloat(newAlertForm.advanceNotice) || 0;
+      alertItem = {
+        id: Date.now(),
+        type: 'usage',
+        title: newAlertForm.title,
+        targetUsage: targetVal,
+        advanceNotice: advanceVal
+      };
+    }
 
-    if (isNaN(targetVal)) return;
+    const updatedAlerts = [...(showAlertModal.alerts || []), alertItem];
 
-    const alertItem = {
-      id: Date.now(),
-      title: newAlertForm.title,
-      targetUsage: targetVal,
-      advanceNotice: advanceVal
-    };
-
-    setVehicles(prev => prev.map(v => {
-      if (v.id === showAlertModal.id) {
-        const updatedAlerts = [...(v.alerts || []), alertItem];
-        return {
-          ...v,
-          alerts: updatedAlerts
-        };
-      }
-      return v;
-    }));
+    setVehicles(prev => prev.map(v => v.id === showAlertModal.id ? { ...v, alerts: updatedAlerts } : v));
 
     if (selectedVehicle && selectedVehicle.id === showAlertModal.id) {
-      setSelectedVehicle(prev => ({
-        ...prev,
-        alerts: [...(prev.alerts || []), alertItem]
-      }));
+      setSelectedVehicle(prev => ({ ...prev, alerts: updatedAlerts }));
     }
+
+    await firestoreUpdate('vehicles', showAlertModal.id, { alerts: updatedAlerts });
 
     setShowAlertModal(null);
-    setNewAlertForm({ title: '', targetUsage: '', advanceNotice: '5' });
+    setNewAlertForm({ type: 'usage', title: '', targetUsage: '', advanceNotice: '5', targetDate: '' });
   };
 
-  const handleDeleteVehicleAlert = (vehicleId, alertId) => {
-    setVehicles(prev => prev.map(v => {
-      if (v.id === vehicleId) {
-        const updatedAlerts = (v.alerts || []).filter(a => a.id !== alertId);
-        return {
-          ...v,
-          alerts: updatedAlerts
-        };
-      }
-      return v;
-    }));
+  const handleDeleteVehicleAlert = async (vehicleId, alertId) => {
+    const targetVehicle = vehicles.find(v => v.id === vehicleId) || (selectedVehicle && selectedVehicle.id === vehicleId ? selectedVehicle : null);
+    const updatedAlerts = (targetVehicle?.alerts || []).filter(a => a.id !== alertId);
+
+    setVehicles(prev => prev.map(v => v.id === vehicleId ? { ...v, alerts: updatedAlerts } : v));
 
     if (selectedVehicle && selectedVehicle.id === vehicleId) {
-      setSelectedVehicle(prev => ({
-        ...prev,
-        alerts: (prev.alerts || []).filter(a => a.id !== alertId)
-      }));
+      setSelectedVehicle(prev => ({ ...prev, alerts: updatedAlerts }));
     }
+
+    await firestoreUpdate('vehicles', vehicleId, { alerts: updatedAlerts });
   };
 
   // Form State para Nuevo Vehículo
@@ -1919,10 +1972,16 @@ export function App() {
   }
 
   return (
-    <div className={`flex min-h-screen font-sans selection:bg-orange-500 selection:text-white pb-24 md:pb-0 antialiased transition-colors duration-300 ${inspectingUser ? 'bg-amber-950 text-amber-50 ring-4 ring-inset ring-amber-500/60' : 'bg-zinc-950 text-zinc-100'}`}>
-      
+    <div
+      className={`flex min-h-screen font-sans selection:bg-orange-500 selection:text-white pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-0 antialiased transition-colors duration-300 ${inspectingUser ? 'bg-amber-950 text-amber-50 ring-4 ring-inset ring-amber-500/60' : 'bg-zinc-950 text-zinc-100'}`}
+      style={{ paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }}
+    >
+
       {/* SIDEBAR DESKTOP (> 768px) */}
-      <aside className={`hidden md:flex flex-col w-64 border-r p-5 justify-between sticky top-0 h-screen shrink-0 transition-colors duration-300 ${inspectingUser ? 'bg-amber-950 border-amber-800/60' : 'bg-zinc-950 border-zinc-800/80'}`}>
+      <aside
+        className={`hidden md:flex flex-col w-64 border-r p-5 justify-between sticky top-0 h-screen shrink-0 overflow-y-auto transition-colors duration-300 ${inspectingUser ? 'bg-amber-950 border-amber-800/60' : 'bg-zinc-950 border-zinc-800/80'}`}
+        style={{ paddingTop: 'max(1.25rem, env(safe-area-inset-top))', paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}
+      >
         <div>
           {/* Header & Logo */}
           <div className="flex items-center gap-3 px-2 py-3 mb-8">
@@ -2018,7 +2077,11 @@ export function App() {
         )}
         
         {/* Header Móvil */}
-        <header className="flex md:hidden items-center justify-between pb-4 mb-5 border-b border-zinc-900">
+        <header
+          className="flex md:hidden items-center justify-between pb-4 mb-5 border-b border-zinc-900"
+          style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top))' }}
+        >
+
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-zinc-900 overflow-hidden border border-orange-500/30 flex items-center justify-center shadow-md shadow-orange-500/20 shrink-0">
               <img src="/logo.png" alt="MyGarageOps Logo" className="w-full h-full object-cover scale-110" />
@@ -2481,7 +2544,7 @@ export function App() {
                 <button 
                   onClick={() => {
                     setShowAlertModal(selectedVehicle);
-                    setNewAlertForm({ title: '', targetUsage: '', advanceNotice: selectedVehicle.unit === 'hrs' ? '5' : '500' });
+                    setNewAlertForm({ type: 'usage', title: '', targetUsage: '', advanceNotice: selectedVehicle.unit === 'hrs' ? '5' : '500', targetDate: '' });
                   }}
                   className="px-3 py-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 font-semibold text-xs transition-all flex items-center justify-center gap-1.5 active:scale-95"
                 >
@@ -2526,7 +2589,7 @@ export function App() {
                 <button
                   onClick={() => {
                     setShowAlertModal(selectedVehicle);
-                    setNewAlertForm({ title: '', targetUsage: '', advanceNotice: selectedVehicle.unit === 'hrs' ? '5' : '500' });
+                    setNewAlertForm({ type: 'usage', title: '', targetUsage: '', advanceNotice: selectedVehicle.unit === 'hrs' ? '5' : '500', targetDate: '' });
                   }}
                   className="text-[11px] font-semibold text-amber-400 hover:text-amber-300 flex items-center gap-1"
                 >
@@ -2537,10 +2600,14 @@ export function App() {
               {selectedVehicle.alerts && selectedVehicle.alerts.length > 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                   {selectedVehicle.alerts.map(al => {
+                    const isDateAlert = al.type === 'date';
                     const current = selectedVehicle.usageNum || 0;
-                    const diff = al.targetUsage - current;
-                    const isDue = diff <= 0;
-                    const isNear = !isDue && diff <= (al.advanceNotice || 0);
+                    const diff = isDateAlert ? null : al.targetUsage - current;
+                    const dateStatus = isDateAlert ? getInspectionStatus(al.targetDate) : null;
+                    const isDue = isDateAlert ? (dateStatus?.days ?? 1) <= 0 : diff <= 0;
+                    const isNear = isDateAlert
+                      ? false
+                      : !isDue && diff <= (al.advanceNotice || 0);
 
                     return (
                       <div 
@@ -2568,13 +2635,27 @@ export function App() {
                           </div>
 
                           <div className="text-[11px] font-mono text-zinc-400 flex items-center gap-2 pt-0.5">
-                            <span>{t('target')} <strong className="text-white">{al.targetUsage} {selectedVehicle.unit}</strong></span>
-                            <span>•</span>
-                            <span>
-                              {isDue 
-                                ? `${t('overdueBy')} ${Math.abs(diff).toFixed(1)} ${selectedVehicle.unit}` 
-                                : `${t('remaining')} ${diff.toFixed(1)} ${selectedVehicle.unit}`}
-                            </span>
+                            {isDateAlert ? (
+                              <>
+                                <span>{t('targetDateLabel')} <strong className="text-white">{new Date(al.targetDate).toLocaleDateString(language === 'en' ? 'en-US' : language)}</strong></span>
+                                <span>•</span>
+                                <span>
+                                  {isDue
+                                    ? `${t('overdueBy')} ${Math.abs(dateStatus.days)} ${language === 'es' ? 'días' : language === 'en' ? 'days' : language === 'it' ? 'giorni' : language === 'fr' ? 'jours' : language === 'de' ? 'Tage' : 'dias'}`
+                                    : `${t('remaining')} ${dateStatus.days} ${language === 'es' ? 'días' : language === 'en' ? 'days' : language === 'it' ? 'giorni' : language === 'fr' ? 'jours' : language === 'de' ? 'Tage' : 'dias'}`}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <span>{t('target')} <strong className="text-white">{al.targetUsage} {selectedVehicle.unit}</strong></span>
+                                <span>•</span>
+                                <span>
+                                  {isDue
+                                    ? `${t('overdueBy')} ${Math.abs(diff).toFixed(1)} ${selectedVehicle.unit}`
+                                    : `${t('remaining')} ${diff.toFixed(1)} ${selectedVehicle.unit}`}
+                                </span>
+                              </>
+                            )}
                           </div>
                         </div>
 
@@ -3069,6 +3150,52 @@ export function App() {
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* SECTOR: NOTIFICACIONES PUSH */}
+            <div className="bg-zinc-900/80 p-6 rounded-3xl border border-zinc-800 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400">
+                  <Bell className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-white">
+                    {language === 'es' ? 'Notificaciones de Alertas' : language === 'en' ? 'Alert Notifications' : language === 'it' ? 'Notifiche degli Avvisi' : language === 'fr' ? 'Notifications des Alertes' : language === 'de' ? 'Warnungsbenachrichtigungen' : 'Notificações de Alertas'}
+                  </h3>
+                  <p className="text-[11px] text-zinc-400">
+                    {language === 'es' ? 'Recibe un aviso en el móvil cuando una alerta de vehículo esté próxima o vencida.' : language === 'en' ? 'Get a push notification when a vehicle alert is near or overdue.' : language === 'it' ? 'Ricevi un avviso quando una notifica del veicolo è vicina o scaduta.' : language === 'fr' ? "Recevez un avis lorsqu'une alerte de véhicule est proche ou dépassée." : language === 'de' ? 'Erhalte eine Benachrichtigung, wenn eine Fahrzeugwarnung bald fällig oder überfällig ist.' : 'Recebe um aviso quando um alerta de veículo estiver próximo ou vencido.'}
+                  </p>
+                </div>
+              </div>
+
+              {pushPermissionStatus === 'unsupported' ? (
+                <p className="text-[11px] text-zinc-500 bg-zinc-950/60 border border-zinc-800 rounded-xl p-3">
+                  {language === 'es' ? 'Tu navegador no soporta notificaciones push. En iPhone, instala la app en la pantalla de inicio (Compartir → Añadir a pantalla de inicio) para poder activarlas.' : language === 'en' ? 'Your browser does not support push notifications. On iPhone, add the app to your home screen (Share → Add to Home Screen) to enable them.' : language === 'it' ? 'Il tuo browser non supporta le notifiche push. Su iPhone, aggiungi l\'app alla schermata Home (Condividi → Aggiungi a Home) per attivarle.' : language === 'fr' ? "Votre navigateur ne prend pas en charge les notifications push. Sur iPhone, ajoutez l'app à l'écran d'accueil (Partager → Sur l'écran d'accueil) pour les activer." : language === 'de' ? 'Dein Browser unterstützt keine Push-Benachrichtigungen. Füge die App auf dem iPhone zum Home-Bildschirm hinzu (Teilen → Zum Home-Bildschirm), um sie zu aktivieren.' : 'O teu navegador não suporta notificações push. No iPhone, adiciona a app ao ecrã principal (Partilhar → Adicionar ao Ecrã Principal) para as ativares.'}
+                </p>
+              ) : pushPermissionStatus === 'granted' ? (
+                <div className="flex items-center gap-2 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>{language === 'es' ? 'Notificaciones activadas' : language === 'en' ? 'Notifications enabled' : language === 'it' ? 'Notifiche attivate' : language === 'fr' ? 'Notifications activées' : language === 'de' ? 'Benachrichtigungen aktiviert' : 'Notificações ativadas'}</span>
+                </div>
+              ) : pushPermissionStatus === 'denied' ? (
+                <p className="text-[11px] text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl p-3">
+                  {language === 'es' ? 'Bloqueaste las notificaciones para esta app. Actívalas desde los ajustes de notificaciones de tu navegador/dispositivo.' : language === 'en' ? 'You blocked notifications for this app. Enable them from your browser/device notification settings.' : language === 'it' ? "Hai bloccato le notifiche per questa app. Attivale dalle impostazioni di notifica del browser/dispositivo." : language === 'fr' ? "Vous avez bloqué les notifications pour cette app. Activez-les depuis les paramètres de notification de votre navigateur/appareil." : language === 'de' ? 'Du hast Benachrichtigungen für diese App blockiert. Aktiviere sie in den Benachrichtigungseinstellungen deines Browsers/Geräts.' : 'Bloqueaste as notificações desta app. Ativa-as nas definições de notificação do teu navegador/dispositivo.'}
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleEnablePushNotifications}
+                  disabled={pushRequestInFlight}
+                  className="w-full py-3 rounded-2xl bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white font-bold text-sm transition-all shadow-lg shadow-orange-500/25 active:scale-95 flex items-center justify-center gap-2"
+                >
+                  <Bell className="w-4 h-4" />
+                  <span>
+                    {pushRequestInFlight
+                      ? (language === 'es' ? 'Activando…' : language === 'en' ? 'Enabling…' : language === 'it' ? 'Attivazione…' : language === 'fr' ? 'Activation…' : language === 'de' ? 'Aktiviere…' : 'A ativar…')
+                      : (language === 'es' ? 'Activar Notificaciones' : language === 'en' ? 'Enable Notifications' : language === 'it' ? 'Attiva Notifiche' : language === 'fr' ? 'Activer les Notifications' : language === 'de' ? 'Benachrichtigungen Aktivieren' : 'Ativar Notificações')}
+                  </span>
+                </button>
+              )}
             </div>
 
             {/* SECTOR: PLAN SAAS, CAMBIO DE PLAN & FACTURACIÓN */}
@@ -3897,7 +4024,15 @@ export function App() {
       </main>
 
       {/* NAVEGACIÓN INFERIOR PWA MÓVIL (< 768px) */}
-      <nav className={`md:hidden fixed bottom-0 left-0 right-0 h-16 backdrop-blur-xl border-t flex items-center justify-around px-2 z-40 transition-colors duration-300 ${inspectingUser ? 'bg-amber-950/90 border-amber-800/60' : 'bg-zinc-950/90 border-zinc-800/80'}`}>
+      <nav
+        className={`md:hidden fixed bottom-0 left-0 right-0 h-16 backdrop-blur-xl border-t flex items-center justify-around px-2 z-40 transition-colors duration-300 ${inspectingUser ? 'bg-amber-950/90 border-amber-800/60' : 'bg-zinc-950/90 border-zinc-800/80'}`}
+        style={{
+          height: 'calc(4rem + env(safe-area-inset-bottom))',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+          paddingLeft: 'max(0.5rem, env(safe-area-inset-left))',
+          paddingRight: 'max(0.5rem, env(safe-area-inset-right))',
+        }}
+      >
         <MobileNavItem icon={Home} label={t('dashboard')} active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setSelectedVehicle(null); }} />
         <MobileNavItem icon={Bike} label={t('garage')} active={activeTab === 'garage'} onClick={() => { setActiveTab('garage'); setSelectedVehicle(null); }} />
         <MobileNavItem icon={Wrench} label={t('parts')} active={activeTab === 'parts'} onClick={() => { setActiveTab('parts'); setSelectedVehicle(null); }} />
@@ -4322,7 +4457,7 @@ export function App() {
       {/* MODAL BOTTOM SHEET: NUEVA / EDITAR INTERVENCIÓN COMPLETA */}
       {showAddMaintenanceModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full max-w-lg bg-zinc-900 rounded-t-3xl sm:rounded-3xl border border-zinc-800 p-6 space-y-4 max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom duration-200">
+          <div className="w-full max-w-lg bg-zinc-900 rounded-t-3xl sm:rounded-3xl border border-zinc-800 p-6 space-y-4 max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom duration-200" style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}>
             <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
               <div>
                 <h3 className="font-bold text-base text-white">
@@ -4560,7 +4695,7 @@ export function App() {
       {/* MODAL BOTTOM SHEET: AÑADIR NUEVO VEHÍCULO */}
       {showAddVehicleModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full max-w-md bg-zinc-900 rounded-t-3xl sm:rounded-3xl border border-zinc-800 p-6 space-y-4 animate-in slide-in-from-bottom duration-200">
+          <div className="w-full max-w-md bg-zinc-900 rounded-t-3xl sm:rounded-3xl border border-zinc-800 p-6 space-y-4 animate-in slide-in-from-bottom duration-200" style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}>
             <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
               <div>
                 <h3 className="font-bold text-base text-white">
@@ -4740,7 +4875,7 @@ export function App() {
       {/* MODAL BOTTOM SHEET: PROGRAMAR NUEVA ALERTA POR VEHÍCULO */}
       {showAlertModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full max-w-md bg-zinc-900 rounded-t-3xl sm:rounded-3xl border border-zinc-800 p-6 space-y-4 animate-in slide-in-from-bottom duration-200">
+          <div className="w-full max-w-md bg-zinc-900 rounded-t-3xl sm:rounded-3xl border border-zinc-800 p-6 space-y-4 animate-in slide-in-from-bottom duration-200" style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}>
             <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
               <div>
                 <h3 className="font-bold text-base text-white">Programar Alerta / Mantenimiento</h3>
@@ -4762,33 +4897,67 @@ export function App() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-zinc-400 font-medium mb-1">Lectura Objetivo ({showAlertModal.unit})</label>
-                  <input 
-                    type="number" 
-                    step="0.1"
-                    placeholder={showAlertModal.unit === 'hrs' ? "50" : "75000"} 
-                    value={newAlertForm.targetUsage}
-                    onChange={(e) => setNewAlertForm({ ...newAlertForm, targetUsage: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-amber-500 font-mono" 
-                    required 
-                  />
-                  <span className="text-[10px] text-zinc-500 mt-1 block">Lectura actual: {showAlertModal.usage}</span>
-                </div>
-                <div>
-                  <label className="block text-zinc-400 font-medium mb-1">Avisar Antes ({showAlertModal.unit})</label>
-                  <input 
-                    type="number" 
-                    step="0.1"
-                    placeholder={showAlertModal.unit === 'hrs' ? "5" : "500"} 
-                    value={newAlertForm.advanceNotice}
-                    onChange={(e) => setNewAlertForm({ ...newAlertForm, advanceNotice: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-amber-500 font-mono" 
-                  />
-                  <span className="text-[10px] text-zinc-500 mt-1 block">Margen de aviso previo</span>
+              <div>
+                <label className="block text-zinc-400 font-medium mb-1.5">Tipo de Alerta</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewAlertForm({ ...newAlertForm, type: 'usage' })}
+                    className={`px-3 py-2.5 rounded-xl border font-semibold text-xs transition-all ${newAlertForm.type === 'usage' ? 'bg-amber-500 border-amber-500 text-white' : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'}`}
+                  >
+                    {t('alertTypeUsage')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewAlertForm({ ...newAlertForm, type: 'date' })}
+                    className={`px-3 py-2.5 rounded-xl border font-semibold text-xs transition-all ${newAlertForm.type === 'date' ? 'bg-amber-500 border-amber-500 text-white' : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'}`}
+                  >
+                    {t('alertTypeDate')}
+                  </button>
                 </div>
               </div>
+
+              {newAlertForm.type === 'date' ? (
+                <div>
+                  <label className="block text-zinc-400 font-medium mb-1">{t('targetDateLabel')}</label>
+                  <input
+                    type="date"
+                    value={newAlertForm.targetDate}
+                    onChange={(e) => setNewAlertForm({ ...newAlertForm, targetDate: e.target.value })}
+                    className="w-full h-11 appearance-none bg-zinc-950 border border-zinc-800 rounded-xl px-3 text-zinc-200 outline-none focus:border-amber-500 font-mono"
+                    style={{ WebkitAppearance: 'none' }}
+                    required
+                  />
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-zinc-400 font-medium mb-1">Lectura Objetivo ({showAlertModal.unit})</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      placeholder={showAlertModal.unit === 'hrs' ? "50" : "75000"}
+                      value={newAlertForm.targetUsage}
+                      onChange={(e) => setNewAlertForm({ ...newAlertForm, targetUsage: e.target.value })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-amber-500 font-mono"
+                      required
+                    />
+                    <span className="text-[10px] text-zinc-500 mt-1 block">Lectura actual: {showAlertModal.usage}</span>
+                  </div>
+                  <div>
+                    <label className="block text-zinc-400 font-medium mb-1">Avisar Antes ({showAlertModal.unit})</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      placeholder={showAlertModal.unit === 'hrs' ? "5" : "500"}
+                      value={newAlertForm.advanceNotice}
+                      onChange={(e) => setNewAlertForm({ ...newAlertForm, advanceNotice: e.target.value })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-amber-500 font-mono"
+                    />
+                    <span className="text-[10px] text-zinc-500 mt-1 block">Margen de aviso previo</span>
+                  </div>
+                </div>
+              )}
 
               <div className="pt-2">
                 <button type="submit" className="w-full py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-sm transition-all shadow-lg shadow-amber-500/25 active:scale-95">
@@ -4803,7 +4972,7 @@ export function App() {
       {/* MODAL BOTTOM SHEET: ACTUALIZAR KILOMETRAJE / HORAS */}
       {showKmModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full max-w-md bg-zinc-900 rounded-t-3xl sm:rounded-3xl border border-zinc-800 p-6 space-y-4 animate-in slide-in-from-bottom duration-200">
+          <div className="w-full max-w-md bg-zinc-900 rounded-t-3xl sm:rounded-3xl border border-zinc-800 p-6 space-y-4 animate-in slide-in-from-bottom duration-200" style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}>
             <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
               <div>
                 <h3 className="font-bold text-base text-white">Actualizar Uso Actual</h3>
@@ -4867,7 +5036,7 @@ export function App() {
       {/* MODAL BOTTOM SHEET: NUEVA / EDITAR PIEZA DE REPUESTO */}
       {showAddPartModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full max-w-md bg-zinc-900 rounded-t-3xl sm:rounded-3xl border border-zinc-800 p-6 space-y-4 animate-in slide-in-from-bottom duration-200">
+          <div className="w-full max-w-md bg-zinc-900 rounded-t-3xl sm:rounded-3xl border border-zinc-800 p-6 space-y-4 animate-in slide-in-from-bottom duration-200" style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}>
             <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
               <div>
                 <h3 className="font-bold text-base text-white">
@@ -5052,7 +5221,7 @@ export function App() {
       {/* MODAL BOTTOM SHEET: AÑADIR NUEVA COMPRA / LOTE DE STOCK */}
       {showBatchModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full max-w-md bg-zinc-900 rounded-t-3xl sm:rounded-3xl border border-zinc-800 p-6 space-y-4 animate-in slide-in-from-bottom duration-200">
+          <div className="w-full max-w-md bg-zinc-900 rounded-t-3xl sm:rounded-3xl border border-zinc-800 p-6 space-y-4 animate-in slide-in-from-bottom duration-200" style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}>
             <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
               <div>
                 <h3 className="font-bold text-base text-white">Registrar Nueva Compra</h3>
@@ -5436,7 +5605,7 @@ export function App() {
         onClick={() => { setOnboardingStep(0); setShowOnboarding(true); }}
         aria-label={t('onboardingHelpAria')}
         title={t('onboardingHelpAria')}
-        className="fixed bottom-24 md:bottom-6 right-4 md:right-6 w-12 h-12 rounded-full bg-zinc-900 border border-zinc-700 text-orange-400 hover:text-white hover:bg-orange-500 hover:border-orange-500 shadow-2xl shadow-black/40 flex items-center justify-center transition-all active:scale-95 z-40"
+        className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] md:bottom-6 right-[max(1rem,env(safe-area-inset-right))] md:right-6 w-12 h-12 rounded-full bg-zinc-900 border border-zinc-700 text-orange-400 hover:text-white hover:bg-orange-500 hover:border-orange-500 shadow-2xl shadow-black/40 flex items-center justify-center transition-all active:scale-95 z-40"
       >
         <HelpCircle className="w-5 h-5" />
       </button>
