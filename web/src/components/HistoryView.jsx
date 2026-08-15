@@ -5,6 +5,7 @@ import { FileText, Wrench, Edit2, Trash2 } from 'lucide-react';
 export function HistoryView({
   t, language,
   handleExportPDFCertificate, handleExportCSV,
+  handleExportMaintenanceDetailPDF,
   maintenances, handleEditMaintenance, handleDeleteMaintenance,
 }) {
   return (
@@ -49,6 +50,13 @@ export function HistoryView({
                 {item.cost}
               </span>
               <div className="flex items-center gap-1 border-l border-zinc-800 pl-3">
+                <button
+                  onClick={() => handleExportMaintenanceDetailPDF(item)}
+                  title="Exportar certificado PDF de esta intervención"
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-orange-400 hover:bg-orange-500/10 transition-colors"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                </button>
                 <button
                   onClick={() => handleEditMaintenance(item)}
                   title="Modificar Intervención"

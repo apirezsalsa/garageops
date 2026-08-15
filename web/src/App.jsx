@@ -1091,6 +1091,10 @@ export function App() {
   // Estado para Modal de Repuestos (Crear/Editar) y Lotes de Compra
   const [showAddPartModal, setShowAddPartModal] = useState(false);
   const [editingPartId, setEditingPartId] = useState(null);
+  // Índice de la fila de "Piezas Usadas" del modal de mantenimiento que abrió el modal de Repuestos
+  // para rellenar la ficha completa (precio, stock mínimo, compatibilidad...) — null si se abrió
+  // directamente desde la pantalla de Repuestos, sin vincular con ninguna intervención.
+  const [partLinkRowIndex, setPartLinkRowIndex] = useState(null);
   const [partSearch, setPartSearch] = useState('');
   const [selectedPartForBatches, setSelectedPartForBatches] = useState(null);
   const [showBatchModal, setShowBatchModal] = useState(null);
@@ -1149,7 +1153,20 @@ export function App() {
         purchases: initialPurchase
       };
 
-      await firestoreAdd('parts', newPart);
+      const newPartId = await firestoreAdd('parts', newPart);
+
+      // Si este repuesto se creó desde una fila de "Piezas Usadas" del modal de mantenimiento
+      // (el usuario pulsó "Rellenar ficha completa"), vincula esa fila al repuesto recién creado
+      // en vez de dejarlo como texto libre.
+      if (partLinkRowIndex !== null) {
+        setNewMaintenanceForm(prev => ({
+          ...prev,
+          partsUsed: prev.partsUsed.map((row, i) => i === partLinkRowIndex
+            ? { ...row, selectedPartId: String(newPartId), manualName: '', partNumber: newPart.reference || row.partNumber }
+            : row)
+        }));
+        setPartLinkRowIndex(null);
+      }
     }
 
     setShowAddPartModal(false);
@@ -1210,21 +1227,24 @@ export function App() {
 
   const [editingMaintenanceId, setEditingMaintenanceId] = useState(null);
 
-  // Form State para Nuevo Mantenimiento Ampliado con Repuesto Consumido
-  const [newMaintenanceForm, setNewMaintenanceForm] = useState({
-    vehicle: vehicles[0]?.name || '',
+  // Formulario en blanco para "Nuevo Registro de Mantenimiento" — reutilizado al abrir el modal en
+  // modo creación y al cerrarlo, para que no arrastre datos de una edición previa sin guardar.
+  const blankMaintenanceForm = (vehicleName) => ({
+    vehicle: vehicleName || vehicles[0]?.name || '',
     title: '',
     category: 'Motor & Transmisión',
     usageAtService: '',
-    selectedPartId: '',
-    partQty: '1',
+    partsUsed: [{ selectedPartId: '', manualName: '', partNumber: '', qty: '1' }],
     partsCost: '',
     laborCost: '',
-    date: '2026-07-25',
+    date: new Date().toISOString().split('T')[0],
     type: 'Preventivo',
     notes: '',
     mechanic: ''
   });
+
+  // Form State para Nuevo Mantenimiento Ampliado con Repuesto Consumido
+  const [newMaintenanceForm, setNewMaintenanceForm] = useState(blankMaintenanceForm());
 
   const handleCreateOrUpdateMaintenance = async (e) => {
     e.preventDefault();
@@ -1233,40 +1253,55 @@ export function App() {
     const targetVehicle = newMaintenanceForm.vehicle || selectedVehicle?.name || vehicles[0]?.name;
     const currentVehObj = vehicles.find(v => v.name.toLowerCase() === targetVehicle.toLowerCase());
 
-    // Si se seleccionó un repuesto del inventario, descontar stock FIFO en Firestore
-    if (newMaintenanceForm.selectedPartId && !editingMaintenanceId) {
-      const targetPart = parts.find(p => String(p.id) === String(newMaintenanceForm.selectedPartId));
-      if (targetPart && targetPart.purchases && targetPart.purchases.length > 0) {
-        let qtyToDeduct = parseFloat(newMaintenanceForm.partQty) || 1;
-        const updatedPurchases = targetPart.purchases.map(batch => {
-          if (qtyToDeduct <= 0) return batch;
-          if (batch.qty >= qtyToDeduct) {
-            const remaining = Math.max(0, parseFloat((batch.qty - qtyToDeduct).toFixed(3)));
-            qtyToDeduct = 0;
-            return { ...batch, qty: remaining };
-          } else {
-            qtyToDeduct = parseFloat((qtyToDeduct - batch.qty).toFixed(3));
-            return { ...batch, qty: 0 };
-          }
-        }).filter(b => b.qty > 0);
-
-        await firestoreUpdate('parts', targetPart.id, { purchases: updatedPurchases });
+    // Procesa cada fila de "piezas usadas": si venía del inventario, descuenta stock FIFO;
+    // si era un nombre escrito a mano (sin repuesto existente), crea la ficha en Repuestos con
+    // stock 0 para que quede disponible la próxima vez (ver [[project_vehicle_alerts_and_push]]-style
+    // decisión: no forzamos al usuario a dar de alta el repuesto antes de poder registrar su uso).
+    const partsUsedRows = (newMaintenanceForm.partsUsed || []).filter(row => row.selectedPartId || (row.manualName || '').trim());
+    const builtPartsUsed = [];
+    for (const row of partsUsedRows) {
+      const qty = parseFloat(row.qty) || 1;
+      if (row.selectedPartId) {
+        const targetPart = parts.find(p => String(p.id) === String(row.selectedPartId));
+        if (!targetPart) continue;
+        if (!editingMaintenanceId && targetPart.purchases && targetPart.purchases.length > 0) {
+          let qtyToDeduct = qty;
+          const updatedPurchases = targetPart.purchases.map(batch => {
+            if (qtyToDeduct <= 0) return batch;
+            if (batch.qty >= qtyToDeduct) {
+              const remaining = Math.max(0, parseFloat((batch.qty - qtyToDeduct).toFixed(3)));
+              qtyToDeduct = 0;
+              return { ...batch, qty: remaining };
+            } else {
+              qtyToDeduct = parseFloat((qtyToDeduct - batch.qty).toFixed(3));
+              return { ...batch, qty: 0 };
+            }
+          }).filter(b => b.qty > 0);
+          await firestoreUpdate('parts', targetPart.id, { purchases: updatedPurchases });
+        }
+        builtPartsUsed.push({ id: targetPart.id, name: targetPart.name, reference: row.partNumber || targetPart.reference || null, qty: String(qty) });
+      } else {
+        const manualName = row.manualName.trim();
+        const newPartId = await firestoreAdd('parts', {
+          name: manualName,
+          reference: row.partNumber || null,
+          unit: 'ud',
+          compatibleVehicles: [targetVehicle],
+          purchases: []
+        });
+        builtPartsUsed.push({ id: newPartId, name: manualName, reference: row.partNumber || null, qty: String(qty) });
       }
     }
 
     const totalCostNum = (parseFloat(newMaintenanceForm.partsCost) || 0) + (parseFloat(newMaintenanceForm.laborCost) || 0);
     const finalCostStr = totalCostNum > 0 ? `${totalCostNum.toFixed(2)} €` : '0.00 €';
 
-    const selectedPartObj = parts.find(p => String(p.id) === String(newMaintenanceForm.selectedPartId));
-
     const maintenanceData = {
       vehicle: targetVehicle,
       title: newMaintenanceForm.title,
       category: newMaintenanceForm.category,
       usageAtService: newMaintenanceForm.usageAtService ? `${newMaintenanceForm.usageAtService} ${currentVehObj?.unit || 'km'}` : currentVehObj?.usage || '',
-      usedPartId: newMaintenanceForm.selectedPartId || null,
-      usedPartName: selectedPartObj ? selectedPartObj.name : null,
-      usedPartQty: newMaintenanceForm.partQty || '1',
+      partsUsed: builtPartsUsed,
       date: newMaintenanceForm.date || new Date().toISOString().split('T')[0],
       cost: finalCostStr,
       partsCost: newMaintenanceForm.partsCost ? `${parseFloat(newMaintenanceForm.partsCost).toFixed(2)} €` : '0.00 €',
@@ -1310,21 +1345,7 @@ export function App() {
 
     setShowAddMaintenanceModal(false);
     setEditingMaintenanceId(null);
-    setNewMaintenanceForm({
-      vehicle: selectedVehicle?.name || vehicles[0]?.name || '',
-      title: '',
-      category: 'Motor & Transmisión',
-      usageAtService: '',
-      selectedPartId: '',
-      partQty: '1',
-      partsCost: '',
-      laborCost: '',
-      cost: '',
-      type: 'Preventivo',
-      date: new Date().toISOString().split('T')[0],
-      notes: '',
-      mechanic: ''
-    });
+    setNewMaintenanceForm(blankMaintenanceForm(selectedVehicle?.name));
   };
 
   // --- FUNCIONES DE EXPORTACIÓN PDF / CSV / BACKUP JSON & NOTIFICACIONES ---
@@ -1423,6 +1444,130 @@ export function App() {
     printWindow.document.close();
   };
 
+  // Genera un PDF de certificado con el detalle completo de UNA sola intervención (no una tabla),
+  // para cuando el usuario quiere justificar/entregar un servicio concreto (venta, garantía, etc.)
+  const handleExportMaintenanceDetailPDF = (item) => {
+    const veh = vehicles.find(v => v.name.toLowerCase() === (item.vehicle || '').toLowerCase());
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      setNoticeModal({
+        title: 'Permiso de Ventanas Emergentes',
+        message: 'Por favor, permite las ventanas emergentes en tu navegador para generar e imprimir el certificado PDF.',
+        type: 'warning'
+      });
+      return;
+    }
+
+    const row = (label, value) => value ? `
+      <tr>
+        <td class="label">${label}</td>
+        <td class="value">${value}</td>
+      </tr>
+    ` : '';
+
+    // Compatibilidad con registros antiguos de un solo repuesto (usedPartId/usedPartName/usedPartQty)
+    const partsUsedList = item.partsUsed && item.partsUsed.length > 0
+      ? item.partsUsed
+      : item.usedPartName
+        ? [{ name: item.usedPartName, reference: item.partNumber || null, qty: item.usedPartQty || 1 }]
+        : [];
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Certificado de Intervención - ${item.title}</title>
+        <style>
+          @page { size: A4 portrait; margin: 16mm; }
+          body { font-family: Arial, Helvetica, sans-serif; font-size: 10pt; margin: 0; padding: 0; color: #1e293b; line-height: 1.4; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #ea580c; padding-bottom: 10px; margin-bottom: 18px; }
+          .logo { font-size: 16pt; font-weight: bold; color: #ea580c; }
+          .badge { background: #fff7ed; color: #c2410c; border: 1px solid #ffedd5; padding: 4px 12px; border-radius: 4px; font-size: 9pt; font-weight: bold; }
+          .title-block { margin-bottom: 18px; }
+          .title-block h2 { font-size: 15pt; margin: 0 0 4px 0; color: #0f172a; }
+          .title-block p { margin: 0; font-size: 10pt; color: #475569; }
+          table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+          td { padding: 9px 12px; border-bottom: 1px solid #e2e8f0; }
+          td.label { width: 180px; font-weight: bold; color: #475569; background: #f8fafc; }
+          td.value { color: #0f172a; }
+          .cost-highlight { font-size: 13pt; font-weight: bold; color: #ea580c; }
+          .notes { margin-top: 18px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px; }
+          .notes h3 { font-size: 10pt; margin: 0 0 6px 0; color: #0f172a; }
+          .notes p { margin: 0; font-size: 9.5pt; color: #475569; white-space: pre-wrap; }
+          .parts-used { margin-top: 18px; }
+          .parts-used h3 { font-size: 10pt; margin: 0 0 6px 0; color: #0f172a; }
+          .parts-used table { margin-top: 0; }
+          .parts-used th { background: #1e293b; color: white; text-align: left; padding: 7px 10px; font-size: 9pt; }
+          .parts-used td { padding: 7px 10px; }
+          .footer { margin-top: 30px; text-align: center; font-size: 8pt; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 8px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="logo">MyGarageOps — Certificado de Intervención</div>
+          <div class="badge">DOCUMENTO OFICIAL VERIFICADO</div>
+        </div>
+        <div class="title-block">
+          <h2>${item.title}</h2>
+          <p>${item.vehicle}${veh ? ` — ${veh.category}` : ''}</p>
+        </div>
+        <table>
+          ${row('Fecha', item.date)}
+          ${row('Tipo de Intervención', item.type)}
+          ${row('Categoría', item.category)}
+          ${row('Taller / Mecánico', item.mechanic)}
+          ${row('Lectura del Vehículo', item.usageAtService)}
+          ${row('Coste de Repuestos', item.partsCost)}
+          ${row('Coste de Mano de Obra', item.laborCost)}
+          <tr>
+            <td class="label">Coste Total</td>
+            <td class="value cost-highlight">${item.cost}</td>
+          </tr>
+        </table>
+        ${partsUsedList.length > 0 ? `
+          <div class="parts-used">
+            <h3>Piezas Utilizadas (${partsUsedList.length})</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Pieza</th>
+                  <th>Número de Pieza / Referencia</th>
+                  <th>Cantidad</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${partsUsedList.map(p => `
+                  <tr>
+                    <td>${p.name}</td>
+                    <td>${p.reference || '—'}</td>
+                    <td>${p.qty || 1}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        ` : ''}
+        ${item.notes ? `
+          <div class="notes">
+            <h3>Notas</h3>
+            <p>${item.notes}</p>
+          </div>
+        ` : ''}
+        <div class="footer">
+          Generado automáticamente por MyGarageOps • Mobile First Vehicle Maintenance System
+        </div>
+        <script>
+          window.onload = function() { window.print(); };
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
+
   const handleExportJSON = () => {
     const backupData = {
       version: '1.0',
@@ -1494,13 +1639,18 @@ export function App() {
 
   const handleEditMaintenance = (item) => {
     setEditingMaintenanceId(item.id);
+    // Compatibilidad con registros antiguos que solo tenían un repuesto (usedPartId/usedPartName/usedPartQty)
+    const partsUsedRows = item.partsUsed && item.partsUsed.length > 0
+      ? item.partsUsed.map(p => ({ selectedPartId: p.id ? String(p.id) : '', manualName: p.id ? '' : (p.name || ''), partNumber: p.reference || '', qty: String(p.qty || '1') }))
+      : item.usedPartId
+        ? [{ selectedPartId: String(item.usedPartId), manualName: '', partNumber: item.partNumber || '', qty: String(item.usedPartQty || '1') }]
+        : [{ selectedPartId: '', manualName: '', partNumber: '', qty: '1' }];
     setNewMaintenanceForm({
       vehicle: item.vehicle,
       title: item.title,
       category: item.category || 'Motor & Transmisión',
       usageAtService: item.usageAtService ? item.usageAtService.replace(/[^0-9.]/g, '') : '',
-      selectedPartId: item.usedPartId ? String(item.usedPartId) : '',
-      partQty: item.usedPartQty ? String(item.usedPartQty) : '1',
+      partsUsed: partsUsedRows,
       partsCost: item.partsCost ? item.partsCost.replace(/[^0-9.]/g, '') : '',
       laborCost: item.laborCost ? item.laborCost.replace(/[^0-9.]/g, '') : '',
       date: item.date || '2026-07-25',
@@ -1885,8 +2035,12 @@ export function App() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <button 
-                    onClick={() => setShowAddMaintenanceModal(true)}
+                  <button
+                    onClick={() => {
+                      setEditingMaintenanceId(null);
+                      setNewMaintenanceForm(blankMaintenanceForm());
+                      setShowAddMaintenanceModal(true);
+                    }}
                     className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs sm:text-sm transition-all shadow-lg shadow-orange-500/25 active:scale-95"
                   >
                     <Plus className="w-4 h-4 stroke-[3]" />
@@ -2326,10 +2480,8 @@ export function App() {
 
                 <button 
                   onClick={() => {
-                    setNewMaintenanceForm(prev => ({
-                      ...prev,
-                      vehicle: selectedVehicle.name
-                    }));
+                    setEditingMaintenanceId(null);
+                    setNewMaintenanceForm(blankMaintenanceForm(selectedVehicle.name));
                     setShowAddMaintenanceModal(true);
                   }}
                   className="col-span-2 px-4 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow-lg shadow-orange-500/25 active:scale-95 transition-all flex items-center justify-center gap-1.5"
@@ -2771,6 +2923,7 @@ export function App() {
           <HistoryView
             t={t} language={language}
             handleExportPDFCertificate={handleExportPDFCertificate} handleExportCSV={handleExportCSV}
+            handleExportMaintenanceDetailPDF={handleExportMaintenanceDetailPDF}
             maintenances={maintenances} handleEditMaintenance={handleEditMaintenance} handleDeleteMaintenance={handleDeleteMaintenance}
           />
         )}
@@ -2841,10 +2994,11 @@ export function App() {
                 </h3>
                 <p className="text-xs text-zinc-400">Detalla la intervención, costes de recambios y observaciones.</p>
               </div>
-              <button 
+              <button
                 onClick={() => {
                   setShowAddMaintenanceModal(false);
                   setEditingMaintenanceId(null);
+                  setNewMaintenanceForm(blankMaintenanceForm());
                 }} 
                 className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center font-bold text-sm"
               >
@@ -2931,80 +3085,129 @@ export function App() {
                 </div>
               </div>
 
-              {/* Selector opcional de repuesto del inventario */}
-              <div className="bg-zinc-950/80 p-3.5 rounded-2xl border border-zinc-800/80 space-y-2">
+              {/* Piezas usadas: cada fila puede venir del inventario (descuenta stock) o ser un nombre
+                  escrito a mano (se crea en Repuestos con stock 0 para poder reponerla más adelante) */}
+              <div className="bg-zinc-950/80 p-3.5 rounded-2xl border border-zinc-800/80 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-mono text-orange-400 font-bold uppercase tracking-wider">📦 Descontar Repuesto de Inventario (Opcional)</span>
+                  <span className="text-[11px] font-mono text-orange-400 font-bold uppercase tracking-wider">📦 Piezas Usadas (Opcional)</span>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="col-span-2">
-                    <select 
-                      value={newMaintenanceForm.selectedPartId}
-                      onChange={(e) => {
-                        const partIdStr = e.target.value;
-                        if (!partIdStr) {
-                          setNewMaintenanceForm({ ...newMaintenanceForm, selectedPartId: '' });
-                          return;
-                        }
-                        const pObj = parts.find(p => String(p.id) === String(partIdStr));
-                        const activeBatch = pObj && pObj.purchases ? pObj.purchases.find(b => b.qty > 0) : null;
-                        const unitPrice = activeBatch ? activeBatch.pricePerUnit : 0;
-                        const qtyNum = parseFloat(newMaintenanceForm.partQty) || 1;
-                        const calculatedCost = unitPrice > 0 ? (unitPrice * qtyNum) : 0;
-                        setNewMaintenanceForm({ 
-                          ...newMaintenanceForm, 
-                          selectedPartId: partIdStr,
-                          partsCost: calculatedCost > 0 ? calculatedCost.toFixed(2) : newMaintenanceForm.partsCost
-                        });
-                      }}
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-medium"
-                    >
-                      <option value="">-- Sin descontar repuesto del inventario --</option>
-                      {parts
-                        .map(p => {
-                          const purchases = p.purchases || [];
-                          const rawStock = purchases.reduce((sum, b) => sum + (b.qty || 0), 0);
-                          const totalStock = parseFloat(rawStock.toFixed(3));
-                          const activeBatch = purchases.find(b => b.qty > 0);
-                          const unitPrice = activeBatch ? activeBatch.pricePerUnit : 0;
 
-                          const isCurrentSelected = String(p.id) === String(newMaintenanceForm.selectedPartId);
+                {newMaintenanceForm.partsUsed.map((row, idx) => {
+                  const pObj = row.selectedPartId ? parts.find(p => String(p.id) === String(row.selectedPartId)) : null;
+                  const updateRow = (patch) => {
+                    const next = newMaintenanceForm.partsUsed.map((r, i) => i === idx ? { ...r, ...patch } : r);
+                    setNewMaintenanceForm({ ...newMaintenanceForm, partsUsed: next });
+                  };
+                  return (
+                    <div key={idx} className="space-y-2 pb-3 border-b border-zinc-800/60 last:border-0 last:pb-0">
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="col-span-2">
+                          <select
+                            value={row.selectedPartId}
+                            onChange={(e) => {
+                              const partIdStr = e.target.value;
+                              if (!partIdStr) {
+                                updateRow({ selectedPartId: '' });
+                                return;
+                              }
+                              const selected = parts.find(p => String(p.id) === String(partIdStr));
+                              updateRow({
+                                selectedPartId: partIdStr,
+                                manualName: '',
+                                partNumber: !row.partNumber && selected?.reference ? selected.reference : row.partNumber
+                              });
+                            }}
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-medium"
+                          >
+                            <option value="">-- Escribir pieza manualmente (sin inventario) --</option>
+                            {parts.map(p => {
+                              const purchases = p.purchases || [];
+                              const rawStock = purchases.reduce((sum, b) => sum + (b.qty || 0), 0);
+                              const totalStock = parseFloat(rawStock.toFixed(3));
+                              const activeBatch = purchases.find(b => b.qty > 0);
+                              const unitPrice = activeBatch ? activeBatch.pricePerUnit : 0;
+                              const isCurrentSelected = String(p.id) === String(row.selectedPartId);
+                              return (
+                                <option key={p.id} value={String(p.id)} disabled={totalStock <= 0 && !isCurrentSelected}>
+                                  {p.name} (Stock: {totalStock} {p.unit || 'ud'} | {unitPrice > 0 ? `${unitPrice.toFixed(2)} €/${p.unit || 'ud'}` : 'Sin precio'}) {totalStock <= 0 ? '- ¡AGOTADO!' : ''}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                        <div>
+                          <input
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            placeholder={`Cant. (1 ${pObj?.unit || 'ud'})`}
+                            value={row.qty}
+                            onChange={(e) => updateRow({ qty: e.target.value })}
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-mono"
+                          />
+                        </div>
+                      </div>
+                      {!row.selectedPartId && (
+                        <input
+                          type="text"
+                          placeholder="Nombre de la pieza (Ej: Disco de freno delantero)"
+                          value={row.manualName}
+                          onChange={(e) => updateRow({ manualName: e.target.value })}
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500"
+                        />
+                      )}
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Número de pieza / referencia (Ej: Brembo 110A26310)"
+                          value={row.partNumber}
+                          onChange={(e) => updateRow({ partNumber: e.target.value })}
+                          className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-mono"
+                        />
+                        {newMaintenanceForm.partsUsed.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setNewMaintenanceForm({ ...newMaintenanceForm, partsUsed: newMaintenanceForm.partsUsed.filter((_, i) => i !== idx) })}
+                            className="p-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 transition-colors shrink-0"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                      {!row.selectedPartId && row.manualName.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewPartForm({
+                              name: row.manualName.trim(),
+                              reference: row.partNumber || '',
+                              unit: 'ud',
+                              compatibleVehicles: [newMaintenanceForm.vehicle],
+                              minStock: '1',
+                              initialQty: '0',
+                              initialPrice: '',
+                              initialSupplier: '',
+                              initialDate: new Date().toISOString().split('T')[0]
+                            });
+                            setPartLinkRowIndex(idx);
+                            setShowAddPartModal(true);
+                          }}
+                          className="text-[11px] font-bold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+                        >
+                          <Plus className="w-3 h-3" /> Rellenar ficha completa (precio, stock, compatibilidad…)
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
 
-                          return (
-                            <option key={p.id} value={String(p.id)} disabled={totalStock <= 0 && !isCurrentSelected}>
-                              {p.name} (Stock: {totalStock} {p.unit || 'ud'} | {unitPrice > 0 ? `${unitPrice.toFixed(2)} €/${p.unit || 'ud'}` : 'Sin precio'}) {totalStock <= 0 ? '- ¡AGOTADO!' : ''}
-                            </option>
-                          );
-                        })}
-                    </select>
-                  </div>
-                  <div>
-                    <input
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      placeholder={(() => {
-                        const pObj = parts.find(p => String(p.id) === String(newMaintenanceForm.selectedPartId));
-                        return `Cant. (1.00 ${pObj?.unit || 'ud'})`;
-                      })()}
-                      value={newMaintenanceForm.partQty}
-                      onChange={(e) => {
-                        const qtyStr = e.target.value;
-                        const qtyNum = parseFloat(qtyStr) || 0;
-                        const pObj = parts.find(p => String(p.id) === String(newMaintenanceForm.selectedPartId));
-                        const activeBatch = pObj && pObj.purchases ? pObj.purchases.find(b => b.qty > 0) : null;
-                        const unitPrice = activeBatch ? activeBatch.pricePerUnit : 0;
-                        const calculatedCost = unitPrice > 0 && qtyNum > 0 ? (unitPrice * qtyNum) : 0;
-                        setNewMaintenanceForm({
-                          ...newMaintenanceForm,
-                          partQty: qtyStr,
-                          partsCost: calculatedCost > 0 ? calculatedCost.toFixed(2) : newMaintenanceForm.partsCost
-                        });
-                      }}
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-mono"
-                    />
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setNewMaintenanceForm({ ...newMaintenanceForm, partsUsed: [...newMaintenanceForm.partsUsed, { selectedPartId: '', manualName: '', partNumber: '', qty: '1' }] })}
+                  className="w-full py-2 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-orange-500/40 text-zinc-300 hover:text-orange-400 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Añadir otra pieza
+                </button>
               </div>
 
               {/* Desglose Económico */}
@@ -3420,11 +3623,12 @@ export function App() {
                 </h3>
                 <p className="text-xs text-zinc-400">Registra repuestos, consumibles y stock de tu taller.</p>
               </div>
-              <button 
+              <button
                 onClick={() => {
                   setShowAddPartModal(false);
                   setEditingPartId(null);
-                }} 
+                  setPartLinkRowIndex(null);
+                }}
                 className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center font-bold text-sm"
               >
                 ✕
