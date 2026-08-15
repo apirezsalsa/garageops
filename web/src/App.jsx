@@ -422,6 +422,7 @@ export function App() {
     typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'
   );
   const [pushRequestInFlight, setPushRequestInFlight] = useState(false);
+  const [testPushInFlight, setTestPushInFlight] = useState(false);
 
   // Escucha pushes que llegan con la app en primer plano (el navegador no muestra el toast del
   // sistema automáticamente en foreground, así que lo mostramos nosotros vía NoticeModal).
@@ -466,6 +467,28 @@ export function App() {
       console.warn('Error activando notificaciones push:', err);
     } finally {
       setPushRequestInFlight(false);
+    }
+  };
+
+  const handleSendTestPush = async () => {
+    setTestPushInFlight(true);
+    try {
+      const sendTestPushNotification = httpsCallable(functions, 'sendTestPushNotification');
+      await sendTestPushNotification();
+      setNoticeModal({
+        title: language === 'es' ? 'Prueba enviada' : language === 'en' ? 'Test sent' : language === 'it' ? 'Test inviato' : language === 'fr' ? 'Test envoyé' : language === 'de' ? 'Test gesendet' : 'Teste enviado',
+        message: language === 'es' ? 'Si tienes las notificaciones activadas en este dispositivo, deberías recibirla en unos segundos.' : language === 'en' ? 'If notifications are enabled on this device, you should receive it in a few seconds.' : language === 'it' ? 'Se le notifiche sono attive su questo dispositivo, dovresti riceverla tra pochi secondi.' : language === 'fr' ? 'Si les notifications sont activées sur cet appareil, vous devriez la recevoir dans quelques secondes.' : language === 'de' ? 'Wenn Benachrichtigungen auf diesem Gerät aktiviert sind, solltest du sie in wenigen Sekunden erhalten.' : 'Se as notificações estiverem ativas neste dispositivo, deverás recebê-la em alguns segundos.',
+        type: 'info'
+      });
+    } catch (err) {
+      console.warn('Error enviando push de prueba:', err);
+      setNoticeModal({
+        title: language === 'es' ? 'Error' : language === 'en' ? 'Error' : language === 'it' ? 'Errore' : language === 'fr' ? 'Erreur' : language === 'de' ? 'Fehler' : 'Erro',
+        message: language === 'es' ? 'No se pudo enviar la notificación de prueba.' : language === 'en' ? 'Could not send the test notification.' : language === 'it' ? 'Impossibile inviare la notifica di prova.' : language === 'fr' ? "Impossible d'envoyer la notification de test." : language === 'de' ? 'Die Testbenachrichtigung konnte nicht gesendet werden.' : 'Não foi possível enviar a notificação de teste.',
+        type: 'error'
+      });
+    } finally {
+      setTestPushInFlight(false);
     }
   };
 
@@ -3173,9 +3196,24 @@ export function App() {
                   {language === 'es' ? 'Tu navegador no soporta notificaciones push. En iPhone, instala la app en la pantalla de inicio (Compartir → Añadir a pantalla de inicio) para poder activarlas.' : language === 'en' ? 'Your browser does not support push notifications. On iPhone, add the app to your home screen (Share → Add to Home Screen) to enable them.' : language === 'it' ? 'Il tuo browser non supporta le notifiche push. Su iPhone, aggiungi l\'app alla schermata Home (Condividi → Aggiungi a Home) per attivarle.' : language === 'fr' ? "Votre navigateur ne prend pas en charge les notifications push. Sur iPhone, ajoutez l'app à l'écran d'accueil (Partager → Sur l'écran d'accueil) pour les activer." : language === 'de' ? 'Dein Browser unterstützt keine Push-Benachrichtigungen. Füge die App auf dem iPhone zum Home-Bildschirm hinzu (Teilen → Zum Home-Bildschirm), um sie zu aktivieren.' : 'O teu navegador não suporta notificações push. No iPhone, adiciona a app ao ecrã principal (Partilhar → Adicionar ao Ecrã Principal) para as ativares.'}
                 </p>
               ) : pushPermissionStatus === 'granted' ? (
-                <div className="flex items-center gap-2 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3">
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>{language === 'es' ? 'Notificaciones activadas' : language === 'en' ? 'Notifications enabled' : language === 'it' ? 'Notifiche attivate' : language === 'fr' ? 'Notifications activées' : language === 'de' ? 'Benachrichtigungen aktiviert' : 'Notificações ativadas'}</span>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>{language === 'es' ? 'Notificaciones activadas' : language === 'en' ? 'Notifications enabled' : language === 'it' ? 'Notifiche attivate' : language === 'fr' ? 'Notifications activées' : language === 'de' ? 'Benachrichtigungen aktiviert' : 'Notificações ativadas'}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSendTestPush}
+                    disabled={testPushInFlight}
+                    className="w-full py-2.5 rounded-2xl bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60 text-white font-bold text-xs transition-all active:scale-95 flex items-center justify-center gap-2"
+                  >
+                    <Bell className="w-3.5 h-3.5" />
+                    <span>
+                      {testPushInFlight
+                        ? (language === 'es' ? 'Enviando…' : language === 'en' ? 'Sending…' : language === 'it' ? 'Invio…' : language === 'fr' ? 'Envoi…' : language === 'de' ? 'Sende…' : 'A enviar…')
+                        : (language === 'es' ? 'Enviar notificación de prueba' : language === 'en' ? 'Send test notification' : language === 'it' ? 'Invia notifica di prova' : language === 'fr' ? 'Envoyer une notification de test' : language === 'de' ? 'Testbenachrichtigung senden' : 'Enviar notificação de teste')}
+                    </span>
+                  </button>
                 </div>
               ) : pushPermissionStatus === 'denied' ? (
                 <p className="text-[11px] text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl p-3">
