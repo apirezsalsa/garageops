@@ -88,7 +88,7 @@ async function logTransaction(event, {
 }
 
 // Callable: crea una sesión de Stripe Checkout (suscripción) para el plan/ciclo elegido por el usuario autenticado
-export const createCheckoutSession = onCall({ secrets: [STRIPE_SECRET_KEY] }, async (request) => {
+export const createCheckoutSession = onCall({ secrets: [STRIPE_SECRET_KEY], enforceAppCheck: true }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Debes iniciar sesión.');
 
@@ -150,7 +150,7 @@ export const createCheckoutSession = onCall({ secrets: [STRIPE_SECRET_KEY] }, as
 });
 
 // Callable: crea una sesión del Billing Portal de Stripe para que el usuario gestione o cancele su suscripción
-export const createPortalSession = onCall({ secrets: [STRIPE_SECRET_KEY] }, async (request) => {
+export const createPortalSession = onCall({ secrets: [STRIPE_SECRET_KEY], enforceAppCheck: true }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Debes iniciar sesión.');
 
@@ -353,7 +353,7 @@ export const stripeWebhook = onRequest({ secrets: [STRIPE_SECRET_KEY, STRIPE_WEB
 // cuentas de Firebase Auth de otros usuarios, por eso hace falta esta función con Admin SDK — borrar solo
 // el documento de Firestore (como hacía antes el Backoffice) dejaba la cuenta de Auth viva, así que el
 // usuario podía volver a iniciar sesión y su perfil se recreaba solo.
-export const deleteUserAccount = onCall(async (request) => {
+export const deleteUserAccount = onCall({ enforceAppCheck: true }, async (request) => {
   const callerUid = request.auth?.uid;
   if (!callerUid) throw new HttpsError('unauthenticated', 'Debes iniciar sesión.');
 
@@ -441,7 +441,7 @@ export const checkVehicleAlerts = onSchedule({ schedule: 'every day 08:00', time
 
 // Callable: envía un push de prueba al usuario autenticado, para verificar de punta a punta que el
 // permiso, el token guardado y el envío desde el backend funcionan, sin esperar al cron diario.
-export const sendTestPushNotification = onCall(async (request) => {
+export const sendTestPushNotification = onCall({ enforceAppCheck: true }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Debes iniciar sesión.');
 
