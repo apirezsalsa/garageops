@@ -1,4 +1,4 @@
-import { FileText, Edit2, Trash2, Gauge, TrendingUp, ShieldAlert, Plus } from 'lucide-react';
+import { FileText, Edit2, Trash2, Gauge, TrendingUp, ShieldAlert, Plus, Paperclip } from 'lucide-react';
 import { translateCategory } from '../locales';
 import { getInspectionStatus, getInspectionLabel } from '../utils/dates';
 import { optimizeImageFile } from '../utils/image';
@@ -315,6 +315,18 @@ export function VehicleDetailView({
                 <div className="flex items-start justify-between gap-3">
                   <h4 className="text-sm font-bold text-zinc-100 leading-snug">{item.title}</h4>
                   <div className="flex items-center gap-1 shrink-0">
+                    {item.receipts && item.receipts.length > 0 && (
+                      <button
+                        onClick={() => setPhotoPreviewModal({ url: item.receipts[0].url, title: `${item.title} — Recibo` })}
+                        title={`${item.receipts.length} foto(s) de ticket/factura`}
+                        className="p-1.5 rounded-lg text-zinc-400 hover:text-orange-400 hover:bg-orange-500/10 transition-colors relative"
+                      >
+                        <Paperclip className="w-3.5 h-3.5" />
+                        <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-orange-500 text-white text-[8px] font-bold flex items-center justify-center">
+                          {item.receipts.length}
+                        </span>
+                      </button>
+                    )}
                     <button
                       onClick={() => handleEditMaintenance(item)}
                       title="Modificar Intervención"

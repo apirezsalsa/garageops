@@ -4,6 +4,7 @@ import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
 import { getMessaging, isSupported } from 'firebase/messaging';
+import { getStorage } from 'firebase/storage';
 
 // Reutilizamos el mismo proyecto Firebase de la app móvil (garageops-6511f)
 const firebaseConfig = {
@@ -18,9 +19,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 // App Check (reCAPTCHA v3, clave del sitio registrada en Firebase Console → App Check).
-// De momento sin "enforcement" activado en Firestore/Functions: solo empieza a emitir tokens
-// para poder comprobar en la consola que las peticiones se verifican bien antes de bloquear
-// las que no los lleven.
+// Enforce activado en Firestore, Authentication y en las Cloud Functions callable sensibles.
 initializeAppCheck(app, {
   provider: new ReCaptchaV3Provider('6LeMLIMtAAAAAEmcUp2aKhobFi7SDZNlJtG7s9DH'),
   isTokenAutoRefreshEnabled: true,
@@ -29,6 +28,7 @@ initializeAppCheck(app, {
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const functions = getFunctions(app);
+export const storage = getStorage(app);
 
 // Clave pública de Web Push (Firebase Console → Configuración del proyecto → Cloud Messaging →
 // "Certificados push web"). No es un secreto, igual que el resto de firebaseConfig.

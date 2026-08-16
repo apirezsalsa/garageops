@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { auth, db, functions, getMessagingIfSupported, VAPID_KEY } from './firebase';
+import { auth, db, functions, storage, getMessagingIfSupported, VAPID_KEY } from './firebase';
+import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { getToken, onMessage } from 'firebase/messaging';
 import { httpsCallable } from 'firebase/functions';
 import { 
@@ -75,7 +76,7 @@ import {
   SEED_PLANS,
 } from './utils/plans';
 import { toDateMs, addMonths, computeNextRenewal, getInspectionLabel, getInspectionStatus } from './utils/dates';
-import { optimizeImageFile } from './utils/image';
+import { optimizeImageFile, optimizeReceiptImage } from './utils/image';
 import { OnboardingTour } from './components/OnboardingTour';
 import { NavItem } from './components/NavItem';
 import { MobileNavItem } from './components/MobileNavItem';
@@ -1067,6 +1068,16 @@ export function App() {
       message: `¿Seguro que deseas eliminar el registro "${m?.title || 'esta intervención'}"?`,
       onConfirm: async () => {
         await firestoreDelete('maintenances', maintId);
+        // Borrar también las fotos de ticket/factura asociadas, para no dejar archivos huérfanos en Storage
+        for (const receipt of m?.receipts || []) {
+          if (receipt.path) {
+            try {
+              await deleteObject(storageRef(storage, receipt.path));
+            } catch (err) {
+              console.warn('No se pudo borrar una foto de recibo huérfana:', err);
+            }
+          }
+        }
       }
     });
   };
@@ -1228,6 +1239,7 @@ export function App() {
   };
 
   const [editingMaintenanceId, setEditingMaintenanceId] = useState(null);
+  const [receiptUploading, setReceiptUploading] = useState(false);
 
   // Formulario en blanco para "Nuevo Registro de Mantenimiento" — reutilizado al abrir el modal en
   // modo creación y al cerrarlo, para que no arrastre datos de una edición previa sin guardar.
@@ -1237,6 +1249,7 @@ export function App() {
     category: 'Motor & Transmisión',
     usageAtService: '',
     partsUsed: [{ selectedPartId: '', manualName: '', partNumber: '', qty: '1' }],
+    receipts: [],
     partsCost: '',
     laborCost: '',
     date: new Date().toISOString().split('T')[0],
@@ -1247,6 +1260,43 @@ export function App() {
 
   // Form State para Nuevo Mantenimiento Ampliado con Repuesto Consumido
   const [newMaintenanceForm, setNewMaintenanceForm] = useState(blankMaintenanceForm());
+
+  // Sube una o varias fotos de ticket/factura a Storage (redimensionadas, sin recortar) y las añade
+  // al formulario. Se suben en cuanto se seleccionan (no se espera a guardar el mantenimiento) para
+  // poder mostrar la miniatura y el progreso de subida de inmediato.
+  const handleAddReceiptPhotos = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (files.length === 0 || !effectiveUserId) return;
+    setReceiptUploading(true);
+    try {
+      for (const file of files) {
+        const blob = await optimizeReceiptImage(file);
+        const path = `receipts/${effectiveUserId}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.webp`;
+        const fileRef = storageRef(storage, path);
+        await uploadBytes(fileRef, blob);
+        const url = await getDownloadURL(fileRef);
+        setNewMaintenanceForm(prev => ({ ...prev, receipts: [...(prev.receipts || []), { url, path }] }));
+      }
+    } catch (err) {
+      console.error('Error subiendo foto de ticket/factura:', err);
+      setNoticeModal({ title: 'Error', message: 'No se pudo subir la foto. Inténtalo de nuevo.', type: 'warning' });
+    } finally {
+      setReceiptUploading(false);
+    }
+  };
+
+  // Quita una foto ya subida del formulario y la borra de Storage (evita archivos huérfanos)
+  const handleRemoveReceiptPhoto = async (index) => {
+    const receipt = newMaintenanceForm.receipts[index];
+    setNewMaintenanceForm(prev => ({ ...prev, receipts: prev.receipts.filter((_, i) => i !== index) }));
+    if (receipt?.path) {
+      try {
+        await deleteObject(storageRef(storage, receipt.path));
+      } catch (err) {
+        console.warn('No se pudo borrar la foto de Storage (puede que ya no exista):', err);
+      }
+    }
+  };
 
   const handleCreateOrUpdateMaintenance = async (e) => {
     e.preventDefault();
@@ -1304,6 +1354,7 @@ export function App() {
       category: newMaintenanceForm.category,
       usageAtService: newMaintenanceForm.usageAtService ? `${newMaintenanceForm.usageAtService} ${currentVehObj?.unit || 'km'}` : currentVehObj?.usage || '',
       partsUsed: builtPartsUsed,
+      receipts: newMaintenanceForm.receipts || [],
       date: newMaintenanceForm.date || new Date().toISOString().split('T')[0],
       cost: finalCostStr,
       partsCost: newMaintenanceForm.partsCost ? `${parseFloat(newMaintenanceForm.partsCost).toFixed(2)} €` : '0.00 €',
@@ -1550,6 +1601,16 @@ export function App() {
             </table>
           </div>
         ` : ''}
+        ${(item.receipts && item.receipts.length > 0) ? `
+          <div class="parts-used">
+            <h3>Fotos de Ticket / Factura (${item.receipts.length})</h3>
+            <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:8px;">
+              ${item.receipts.map(r => `
+                <img src="${r.url}" style="width:140px; height:140px; object-fit:cover; border-radius:8px; border:1px solid #e2e8f0;" />
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
         ${item.notes ? `
           <div class="notes">
             <h3>Notas</h3>
@@ -1653,6 +1714,7 @@ export function App() {
       category: item.category || 'Motor & Transmisión',
       usageAtService: item.usageAtService ? item.usageAtService.replace(/[^0-9.]/g, '') : '',
       partsUsed: partsUsedRows,
+      receipts: item.receipts || [],
       partsCost: item.partsCost ? item.partsCost.replace(/[^0-9.]/g, '') : '',
       laborCost: item.laborCost ? item.laborCost.replace(/[^0-9.]/g, '') : '',
       date: item.date || '2026-07-25',
@@ -2066,6 +2128,7 @@ export function App() {
             handleExportPDFCertificate={handleExportPDFCertificate} handleExportCSV={handleExportCSV}
             handleExportMaintenanceDetailPDF={handleExportMaintenanceDetailPDF}
             maintenances={maintenances} handleEditMaintenance={handleEditMaintenance} handleDeleteMaintenance={handleDeleteMaintenance}
+            setPhotoPreviewModal={setPhotoPreviewModal}
           />
         )}
 
@@ -2400,6 +2463,46 @@ export function App() {
                   onChange={(e) => setNewMaintenanceForm({ ...newMaintenanceForm, notes: e.target.value })}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-medium placeholder:text-zinc-600 resize-none" 
                 />
+              </div>
+
+              <div>
+                <label className="block text-zinc-400 font-medium mb-1">Fotos de Ticket / Factura (Opcional)</label>
+                <div className="flex flex-wrap gap-2">
+                  {(newMaintenanceForm.receipts || []).map((r, idx) => (
+                    <div key={r.path || idx} className="relative w-16 h-16 rounded-xl overflow-hidden border border-zinc-800 group">
+                      <img
+                        src={r.url}
+                        alt={`Recibo ${idx + 1}`}
+                        className="w-full h-full object-cover cursor-pointer"
+                        onClick={() => setPhotoPreviewModal({ url: r.url, title: `Recibo ${idx + 1}` })}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveReceiptPhoto(idx)}
+                        className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 text-white text-[10px] flex items-center justify-center leading-none"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <label className={`w-16 h-16 rounded-xl border border-dashed border-zinc-700 flex items-center justify-center text-zinc-500 hover:text-orange-400 hover:border-orange-500/40 cursor-pointer transition-colors ${receiptUploading ? 'opacity-50 pointer-events-none' : ''}`}>
+                    {receiptUploading ? (
+                      <div className="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Plus className="w-5 h-5" />
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        handleAddReceiptPhotos(e.target.files);
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
+                </div>
               </div>
 
               <div className="pt-2">

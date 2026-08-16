@@ -1,4 +1,4 @@
-import { FileText, Wrench, Edit2, Trash2 } from 'lucide-react';
+import { FileText, Wrench, Edit2, Trash2, Paperclip } from 'lucide-react';
 
 // Pantalla "Historial de Mantenimiento": libro digital de servicios + certificado de venta.
 // Puramente presentacional, sin estado propio.
@@ -7,6 +7,7 @@ export function HistoryView({
   handleExportPDFCertificate, handleExportCSV,
   handleExportMaintenanceDetailPDF,
   maintenances, handleEditMaintenance, handleDeleteMaintenance,
+  setPhotoPreviewModal,
 }) {
   return (
     <div className="space-y-6">
@@ -50,6 +51,18 @@ export function HistoryView({
                 {item.cost}
               </span>
               <div className="flex items-center gap-1 border-l border-zinc-800 pl-3">
+                {item.receipts && item.receipts.length > 0 && (
+                  <button
+                    onClick={() => setPhotoPreviewModal({ url: item.receipts[0].url, title: `${item.title} — Recibo` })}
+                    title={`${item.receipts.length} foto(s) de ticket/factura`}
+                    className="p-1.5 rounded-lg text-zinc-400 hover:text-orange-400 hover:bg-orange-500/10 transition-colors relative"
+                  >
+                    <Paperclip className="w-3.5 h-3.5" />
+                    <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-orange-500 text-white text-[8px] font-bold flex items-center justify-center">
+                      {item.receipts.length}
+                    </span>
+                  </button>
+                )}
                 <button
                   onClick={() => handleExportMaintenanceDetailPDF(item)}
                   title="Exportar certificado PDF de esta intervención"

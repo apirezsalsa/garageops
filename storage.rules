@@ -1,0 +1,16 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Fotos de tickets/facturas de mantenimiento, organizadas por usuario: solo su dueño puede
+    // leer/escribir sus propios archivos. Límite de 8MB y solo imágenes, como defensa adicional
+    // (la app ya redimensiona/comprime antes de subir, esto es solo por si alguien se salta el cliente).
+    match /receipts/{userId}/{allPaths=**} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create, update: if request.auth != null && request.auth.uid == userId
+        && request.resource.size < 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
