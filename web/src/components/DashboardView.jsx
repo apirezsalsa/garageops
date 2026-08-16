@@ -60,7 +60,7 @@ export function DashboardView({
         {(() => {
           const lowStockCount = parts.filter(p => {
             const total = (p.purchases || []).reduce((sum, b) => sum + (b.qty || 0), 0);
-            return total <= (p.minStock || 1);
+            return p.lowStockAlertEnabled !== false && total <= (p.minStock || 1);
           }).length;
           const vehicleAlerts = vehicles.filter(v => v.status !== 'ok').length;
           const totalAlerts = lowStockCount + vehicleAlerts;
@@ -79,7 +79,7 @@ export function DashboardView({
         {(() => {
           const lowStockCount = parts.filter(p => {
             const total = (p.purchases || []).reduce((sum, b) => sum + (b.qty || 0), 0);
-            return total <= (p.minStock || 1);
+            return p.lowStockAlertEnabled !== false && total <= (p.minStock || 1);
           }).length;
 
           return (
@@ -201,7 +201,7 @@ export function DashboardView({
             const warnings = vehicles.filter(v => v.status !== 'ok');
             const lowStockParts = parts.filter(p => {
               const total = (p.purchases || []).reduce((sum, b) => sum + (b.qty || 0), 0);
-              return total <= (p.minStock || 1);
+              return p.lowStockAlertEnabled !== false && total <= (p.minStock || 1);
             });
 
             if (warnings.length === 0 && lowStockParts.length === 0) {

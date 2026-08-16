@@ -1118,6 +1118,7 @@ export function App() {
     unit: 'ud',
     compatibleVehicles: [],
     minStock: '1',
+    lowStockAlertEnabled: true,
     initialQty: '1',
     initialPrice: '',
     initialSupplier: '',
@@ -1143,7 +1144,8 @@ export function App() {
         reference: newPartForm.reference || null,
         unit: newPartForm.unit || 'ud',
         compatibleVehicles: newPartForm.compatibleVehicles.length > 0 ? newPartForm.compatibleVehicles : ['Universal'],
-        minStock: minStockNum
+        minStock: minStockNum,
+        lowStockAlertEnabled: newPartForm.lowStockAlertEnabled !== false
       });
     } else {
       const initialQtyNum = parseFloat(newPartForm.initialQty) || 0;
@@ -1163,6 +1165,7 @@ export function App() {
         unit: newPartForm.unit || 'ud',
         compatibleVehicles: newPartForm.compatibleVehicles.length > 0 ? newPartForm.compatibleVehicles : ['Universal'],
         minStock: minStockNum,
+        lowStockAlertEnabled: newPartForm.lowStockAlertEnabled !== false,
         purchases: initialPurchase
       };
 
@@ -1190,6 +1193,7 @@ export function App() {
       unit: 'ud',
       compatibleVehicles: [],
       minStock: '1',
+      lowStockAlertEnabled: true,
       initialQty: '1',
       initialPrice: '',
       initialSupplier: '',
@@ -1230,6 +1234,7 @@ export function App() {
       unit: p.unit || 'ud',
       compatibleVehicles: p.compatibleVehicles || (p.vehicle ? [p.vehicle] : ['Universal']),
       minStock: String(p.minStock || 1),
+      lowStockAlertEnabled: p.lowStockAlertEnabled !== false,
       initialQty: '0',
       initialPrice: '',
       initialSupplier: '',
@@ -1429,7 +1434,6 @@ export function App() {
           body { font-family: Arial, Helvetica, sans-serif; font-size: 9pt; margin: 0; padding: 0; color: #1e293b; line-height: 1.3; }
           .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #ea580c; padding-bottom: 8px; margin-bottom: 12px; }
           .logo { font-size: 15pt; font-weight: bold; color: #ea580c; }
-          .badge { background: #fff7ed; color: #c2410c; border: 1px solid #ffedd5; padding: 3px 10px; border-radius: 4px; font-size: 8.5pt; font-weight: bold; }
           .veh-info { background: #f8fafc; border: 1px solid #e2e8f0; padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; }
           .veh-info h2 { font-size: 12pt; margin: 0 0 3px 0; color: #0f172a; }
           .veh-info p { margin: 0; font-size: 9pt; color: #475569; white-space: nowrap; }
@@ -1449,7 +1453,6 @@ export function App() {
       <body>
         <div class="header">
           <div class="logo">MyGarageOps — Libro Digital de Servicio</div>
-          <div class="badge">DOCUMENTO OFICIAL VERIFICADO</div>
         </div>
         <div class="veh-info">
           <div>
@@ -1536,7 +1539,6 @@ export function App() {
           body { font-family: Arial, Helvetica, sans-serif; font-size: 10pt; margin: 0; padding: 0; color: #1e293b; line-height: 1.4; }
           .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #ea580c; padding-bottom: 10px; margin-bottom: 18px; }
           .logo { font-size: 16pt; font-weight: bold; color: #ea580c; }
-          .badge { background: #fff7ed; color: #c2410c; border: 1px solid #ffedd5; padding: 4px 12px; border-radius: 4px; font-size: 9pt; font-weight: bold; }
           .title-block { margin-bottom: 18px; }
           .title-block h2 { font-size: 15pt; margin: 0 0 4px 0; color: #0f172a; }
           .title-block p { margin: 0; font-size: 10pt; color: #475569; }
@@ -1559,7 +1561,6 @@ export function App() {
       <body>
         <div class="header">
           <div class="logo">MyGarageOps — Certificado de Intervención</div>
-          <div class="badge">DOCUMENTO OFICIAL VERIFICADO</div>
         </div>
         <div class="title-block">
           <h2>${item.title}</h2>
@@ -2067,13 +2068,24 @@ export function App() {
             </div>
           </div>
           
-          <button 
-            onClick={() => { setActiveTab('profile'); setSelectedVehicle(null); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs font-semibold text-orange-400 active:scale-95 transition-transform"
-          >
-            <User className="w-3.5 h-3.5" />
-            <span>Perfil</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => { setOnboardingStep(0); setShowOnboarding(true); }}
+              aria-label={t('onboardingHelpAria')}
+              title={t('onboardingHelpAria')}
+              className="w-9 h-9 rounded-xl bg-zinc-900 border border-zinc-800 text-orange-400 active:scale-95 transition-transform flex items-center justify-center shrink-0"
+            >
+              <HelpCircle className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => { setActiveTab('profile'); setSelectedVehicle(null); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs font-semibold text-orange-400 active:scale-95 transition-transform"
+            >
+              <User className="w-3.5 h-3.5" />
+              <span>Perfil</span>
+            </button>
+          </div>
         </header>
 
         {activeTab === 'dashboard' && !selectedVehicle && (
@@ -2097,7 +2109,7 @@ export function App() {
             setShowKmModal={setShowKmModal} setNewKmValue={setNewKmValue}
             setEditingMaintenanceId={setEditingMaintenanceId} blankMaintenanceForm={blankMaintenanceForm} setNewMaintenanceForm={setNewMaintenanceForm} setShowAddMaintenanceModal={setShowAddMaintenanceModal}
             handleDeleteVehicleAlert={handleDeleteVehicleAlert}
-            handleEditMaintenance={handleEditMaintenance} handleDeleteMaintenance={handleDeleteMaintenance}
+            handleEditMaintenance={handleEditMaintenance}
           />
         )}
 
@@ -2118,7 +2130,7 @@ export function App() {
             parts={parts}
             setEditingPartId={setEditingPartId} setNewPartForm={setNewPartForm} setShowAddPartModal={setShowAddPartModal}
             setShowBatchModal={setShowBatchModal} setNewBatchForm={setNewBatchForm}
-            handleEditPart={handleEditPart} handleDeletePart={handleDeletePart}
+            handleEditPart={handleEditPart}
           />
         )}
 
@@ -2127,7 +2139,7 @@ export function App() {
             t={t} language={language}
             handleExportPDFCertificate={handleExportPDFCertificate} handleExportCSV={handleExportCSV}
             handleExportMaintenanceDetailPDF={handleExportMaintenanceDetailPDF}
-            maintenances={maintenances} handleEditMaintenance={handleEditMaintenance} handleDeleteMaintenance={handleDeleteMaintenance}
+            maintenances={maintenances} handleEditMaintenance={handleEditMaintenance}
             setPhotoPreviewModal={setPhotoPreviewModal}
           />
         )}
@@ -2474,7 +2486,7 @@ export function App() {
                         src={r.url}
                         alt={`Recibo ${idx + 1}`}
                         className="w-full h-full object-cover cursor-pointer"
-                        onClick={() => setPhotoPreviewModal({ url: r.url, title: `Recibo ${idx + 1}` })}
+                        onClick={() => setPhotoPreviewModal({ urls: newMaintenanceForm.receipts.map(x => x.url), index: idx, title: newMaintenanceForm.title || 'Recibo' })}
                       />
                       <button
                         type="button"
@@ -2505,10 +2517,26 @@ export function App() {
                 </div>
               </div>
 
-              <div className="pt-2">
+              <div className="pt-2 space-y-2">
                 <button type="submit" className="w-full py-3.5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm transition-all shadow-lg shadow-orange-500/25 active:scale-95">
                   {editingMaintenanceId ? 'Guardar Cambios en Registro' : 'Guardar Registro Completo'}
                 </button>
+                {editingMaintenanceId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const idToDelete = editingMaintenanceId;
+                      setShowAddMaintenanceModal(false);
+                      setEditingMaintenanceId(null);
+                      setNewMaintenanceForm(blankMaintenanceForm());
+                      handleDeleteMaintenance(idToDelete);
+                    }}
+                    className="w-full py-3 rounded-2xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 font-bold text-sm transition-all active:scale-95 flex items-center justify-center gap-2"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Eliminar Registro</span>
+                  </button>
+                )}
               </div>
             </form>
           </div>
@@ -2977,6 +3005,19 @@ export function App() {
                 </div>
               </div>
 
+              <label className="flex items-center gap-2.5 bg-zinc-950 p-3 rounded-2xl border border-zinc-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={newPartForm.lowStockAlertEnabled}
+                  onChange={(e) => setNewPartForm({ ...newPartForm, lowStockAlertEnabled: e.target.checked })}
+                  className="accent-orange-500 w-4 h-4"
+                />
+                <span className="text-xs text-zinc-300 font-medium">
+                  Avisar cuando el stock esté bajo
+                  <span className="block text-[10px] text-zinc-500 font-normal mt-0.5">Desactívalo para repuestos que no te importa tener agotados (no aparecerá en alertas ni notificaciones)</span>
+                </span>
+              </label>
+
               {!editingPartId && (
                 <div className="bg-zinc-950 p-3.5 rounded-2xl border border-zinc-800 space-y-3">
                   <span className="text-[11px] font-mono text-orange-400 font-bold uppercase tracking-wider block">🧾 Datos de la primera compra / lote inicial</span>
@@ -3032,10 +3073,25 @@ export function App() {
                 </div>
               )}
 
-              <div className="pt-2">
+              <div className="pt-2 space-y-2">
                 <button type="submit" className="w-full py-3.5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm transition-all shadow-lg shadow-orange-500/25 active:scale-95">
                   {editingPartId ? 'Guardar Cambios' : 'Registrar Repuesto y Compra'}
                 </button>
+                {editingPartId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const idToDelete = editingPartId;
+                      setShowAddPartModal(false);
+                      setEditingPartId(null);
+                      handleDeletePart(idToDelete);
+                    }}
+                    className="w-full py-3 rounded-2xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 font-bold text-sm transition-all active:scale-95 flex items-center justify-center gap-2"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Eliminar Repuesto</span>
+                  </button>
+                )}
               </div>
             </form>
           </div>
@@ -3194,32 +3250,67 @@ export function App() {
         </div>
       )}
 
-      {/* MODAL PERSONALIZADO DE PREVISUALIZACIÓN DE FOTO A PANTALLA COMPLETA */}
-      {photoPreviewModal && (
+      {/* MODAL PERSONALIZADO DE PREVISUALIZACIÓN DE FOTO A PANTALLA COMPLETA (soporta galería con varias fotos) */}
+      {photoPreviewModal && (() => {
+        const urls = photoPreviewModal.urls || [photoPreviewModal.url];
+        const index = photoPreviewModal.index || 0;
+        const hasMultiple = urls.length > 1;
+        return (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-xl z-50 flex items-center justify-center p-4">
           <div className="relative max-w-3xl w-full bg-zinc-900 rounded-3xl border border-zinc-800 p-4 shadow-2xl animate-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-3 mb-3 border-b border-zinc-800">
               <h3 className="font-extrabold text-sm text-white tracking-tight flex items-center gap-2">
-                <span>📷</span> {photoPreviewModal.title}
+                <span>📷</span> {photoPreviewModal.title}{hasMultiple ? ` (${index + 1}/${urls.length})` : ''}
               </h3>
-              <button 
+              <button
                 type="button"
-                onClick={() => setPhotoPreviewModal(null)} 
+                onClick={() => setPhotoPreviewModal(null)}
                 className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center font-bold text-sm transition-colors"
               >
                 ✕
               </button>
             </div>
-            <div className="max-h-[75vh] overflow-hidden rounded-2xl bg-zinc-950 flex items-center justify-center border border-zinc-800/80">
-              <img 
-                src={photoPreviewModal.url} 
-                alt={photoPreviewModal.title} 
+            <div className="relative max-h-[75vh] overflow-hidden rounded-2xl bg-zinc-950 flex items-center justify-center border border-zinc-800/80">
+              <img
+                src={urls[index]}
+                alt={photoPreviewModal.title}
                 className="max-h-[75vh] w-auto max-w-full object-contain rounded-xl"
               />
+              {hasMultiple && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setPhotoPreviewModal({ ...photoPreviewModal, index: (index - 1 + urls.length) % urls.length })}
+                    className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center transition-colors"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPhotoPreviewModal({ ...photoPreviewModal, index: (index + 1) % urls.length })}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center transition-colors"
+                  >
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </>
+              )}
             </div>
+            {hasMultiple && (
+              <div className="flex items-center justify-center gap-1.5 pt-3">
+                {urls.map((_, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setPhotoPreviewModal({ ...photoPreviewModal, index: i })}
+                    className={`h-1.5 rounded-full transition-all ${i === index ? 'w-6 bg-orange-500' : 'w-1.5 bg-zinc-700'}`}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* BOTÓN FLOTANTE DE AYUDA: reabre el tour de bienvenida cuando se quiera */}
       <button
@@ -3227,7 +3318,7 @@ export function App() {
         onClick={() => { setOnboardingStep(0); setShowOnboarding(true); }}
         aria-label={t('onboardingHelpAria')}
         title={t('onboardingHelpAria')}
-        className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] md:bottom-6 right-[max(1rem,env(safe-area-inset-right))] md:right-6 w-12 h-12 rounded-full bg-zinc-900 border border-zinc-700 text-orange-400 hover:text-white hover:bg-orange-500 hover:border-orange-500 shadow-2xl shadow-black/40 flex items-center justify-center transition-all active:scale-95 z-40"
+        className="hidden md:flex fixed bottom-6 left-6 w-12 h-12 rounded-full bg-zinc-900 border border-zinc-700 text-orange-400 hover:text-white hover:bg-orange-500 hover:border-orange-500 shadow-2xl shadow-black/40 items-center justify-center transition-all active:scale-95 z-40"
       >
         <HelpCircle className="w-5 h-5" />
       </button>

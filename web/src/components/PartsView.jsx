@@ -1,15 +1,16 @@
 import { useState } from 'react';
-import { Plus, Search, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Search, ChevronRight } from 'lucide-react';
 
-// Pantalla "Repuestos": listado con búsqueda, lotes de compra desplegables, editar/borrar.
-// Los modales de Añadir/Editar Repuesto y de Añadir Lote viven en App() (compartidos también
-// desde el modal de mantenimiento), así que solo se disparan aquí vía props.
+// Pantalla "Repuestos": listado con búsqueda, lotes de compra desplegables. Tocar una fila abre
+// su edición (ver AGENTS.md: decisión de UX — filas tocables en vez de iconos diminutos de lápiz/
+// papelera). Los modales de Añadir/Editar Repuesto y de Añadir Lote viven en App() (compartidos
+// también desde el modal de mantenimiento), así que solo se disparan aquí vía props.
 export function PartsView({
   t, language,
   parts,
   setEditingPartId, setNewPartForm, setShowAddPartModal,
   setShowBatchModal, setNewBatchForm,
-  handleEditPart, handleDeletePart,
+  handleEditPart,
 }) {
   const [partSearch, setPartSearch] = useState('');
   const [selectedPartForBatches, setSelectedPartForBatches] = useState(null);
@@ -72,7 +73,7 @@ export function PartsView({
               if (typeof num !== 'number' || isNaN(num)) return '0';
               return Number.isInteger(num) ? num.toString() : parseFloat(num.toFixed(3)).toString();
             };
-            const isLow = totalStock <= (p.minStock || 1);
+            const isLow = p.lowStockAlertEnabled !== false && totalStock <= (p.minStock || 1);
 
             // Formatear precios de compra (mostrar rango o único precio)
             const prices = purchases.map(b => b.pricePerUnit).filter(pr => pr > 0);
@@ -86,7 +87,10 @@ export function PartsView({
 
             return (
               <div key={p.id} className="divide-y divide-zinc-800/40">
-                <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-zinc-800/30 transition-colors">
+                <div
+                  onClick={() => handleEditPart(p)}
+                  className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-zinc-800/30 active:bg-zinc-800/50 transition-colors cursor-pointer"
+                >
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="text-xs sm:text-sm font-bold text-zinc-100">{p.name}</p>
@@ -126,39 +130,27 @@ export function PartsView({
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-1.5 border-l border-zinc-800 pl-3">
+                    <div className="flex items-center gap-1 border-l border-zinc-800 pl-2">
                       <button
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setShowBatchModal(p);
                           setNewBatchForm({ qty: '1', pricePerUnit: '', supplier: '', date: '2026-07-25' });
                         }}
                         title="Añadir nueva compra / lote de stock"
-                        className="px-2.5 py-1.5 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/30 text-[11px] font-bold transition-all flex items-center gap-1"
+                        className="min-h-[44px] px-2.5 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/30 text-[11px] font-bold transition-all flex items-center gap-1"
                       >
                         <Plus className="w-3.5 h-3.5" />
                         <span>+ {language === 'es' ? 'Compra' : language === 'en' ? 'Batch' : language === 'it' ? 'Lotto' : language === 'fr' ? 'Lot' : language === 'de' ? 'Charge' : 'Lote'}</span>
                       </button>
                       <button
-                        onClick={() => setSelectedPartForBatches(isExpanded ? null : p.id)}
+                        onClick={(e) => { e.stopPropagation(); setSelectedPartForBatches(isExpanded ? null : p.id); }}
                         title="Ver Historial de Lotes de Compra"
-                        className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors text-xs font-mono"
+                        className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors text-xs font-mono"
                       >
                         {isExpanded ? '▲' : '▼'}
                       </button>
-                      <button
-                        onClick={() => handleEditPart(p)}
-                        title="Modificar Repuesto"
-                        className="p-1.5 rounded-lg text-zinc-400 hover:text-orange-400 hover:bg-orange-500/10 transition-colors"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleDeletePart(p.id)}
-                        title="Eliminar Repuesto"
-                        className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <ChevronRight className="w-4 h-4 text-zinc-600 shrink-0 hidden sm:block" />
                     </div>
                   </div>
                 </div>

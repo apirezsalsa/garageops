@@ -1,4 +1,4 @@
-import { FileText, Edit2, Trash2, Gauge, TrendingUp, ShieldAlert, Plus, Paperclip } from 'lucide-react';
+import { FileText, Edit2, Trash2, Gauge, TrendingUp, ShieldAlert, Plus, Paperclip, ChevronRight } from 'lucide-react';
 import { translateCategory } from '../locales';
 import { getInspectionStatus, getInspectionLabel } from '../utils/dates';
 import { optimizeImageFile } from '../utils/image';
@@ -16,7 +16,7 @@ export function VehicleDetailView({
   setShowKmModal, setNewKmValue,
   setEditingMaintenanceId, blankMaintenanceForm, setNewMaintenanceForm, setShowAddMaintenanceModal,
   handleDeleteVehicleAlert,
-  handleEditMaintenance, handleDeleteMaintenance,
+  handleEditMaintenance,
 }) {
   const vehicleMaintenances = maintenances.filter(m => (m.vehicle || '').toLowerCase() === (selectedVehicle?.name || '').toLowerCase());
 
@@ -310,37 +310,28 @@ export function VehicleDetailView({
         <div className="bg-zinc-900/60 rounded-3xl border border-zinc-800/80 divide-y divide-zinc-800/60 overflow-hidden">
           {vehicleMaintenances.length > 0 ? (
             vehicleMaintenances.map((item) => (
-              <div key={item.id} className="p-4 sm:p-5 hover:bg-zinc-800/30 transition-colors space-y-3">
+              <div
+                key={item.id}
+                onClick={() => handleEditMaintenance(item)}
+                className="p-4 sm:p-5 hover:bg-zinc-800/30 active:bg-zinc-800/50 transition-colors space-y-3 cursor-pointer"
+              >
                 {/* Línea 1 Superior Dedicada: Título del Trabajo y Acciones */}
                 <div className="flex items-start justify-between gap-3">
                   <h4 className="text-sm font-bold text-zinc-100 leading-snug">{item.title}</h4>
                   <div className="flex items-center gap-1 shrink-0">
                     {item.receipts && item.receipts.length > 0 && (
                       <button
-                        onClick={() => setPhotoPreviewModal({ url: item.receipts[0].url, title: `${item.title} — Recibo` })}
+                        onClick={(e) => { e.stopPropagation(); setPhotoPreviewModal({ urls: item.receipts.map(r => r.url), index: 0, title: `${item.title} — Recibo` }); }}
                         title={`${item.receipts.length} foto(s) de ticket/factura`}
-                        className="p-1.5 rounded-lg text-zinc-400 hover:text-orange-400 hover:bg-orange-500/10 transition-colors relative"
+                        className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-zinc-400 hover:text-orange-400 hover:bg-orange-500/10 transition-colors relative"
                       >
-                        <Paperclip className="w-3.5 h-3.5" />
-                        <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-orange-500 text-white text-[8px] font-bold flex items-center justify-center">
+                        <Paperclip className="w-4 h-4" />
+                        <span className="absolute top-1.5 right-1.5 w-3.5 h-3.5 rounded-full bg-orange-500 text-white text-[8px] font-bold flex items-center justify-center">
                           {item.receipts.length}
                         </span>
                       </button>
                     )}
-                    <button
-                      onClick={() => handleEditMaintenance(item)}
-                      title="Modificar Intervención"
-                      className="p-1.5 rounded-lg text-zinc-400 hover:text-orange-400 hover:bg-orange-500/10 transition-colors"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteMaintenance(item.id)}
-                      title="Borrar Registro"
-                      className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <ChevronRight className="w-4 h-4 text-zinc-600 shrink-0" />
                   </div>
                 </div>
 
