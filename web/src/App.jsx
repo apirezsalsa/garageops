@@ -78,6 +78,8 @@ import {
 import { toDateMs, addMonths, computeNextRenewal, getInspectionLabel, getInspectionStatus } from './utils/dates';
 import { optimizeImageFile, optimizeReceiptImage } from './utils/image';
 import { OnboardingTour } from './components/OnboardingTour';
+import { ChangelogModal } from './components/ChangelogModal';
+import { APP_VERSION, CHANGELOG } from './changelog';
 import { NavItem } from './components/NavItem';
 import { MobileNavItem } from './components/MobileNavItem';
 import { MetricBento } from './components/MetricBento';
@@ -104,6 +106,10 @@ export function App() {
   // Tour de bienvenida: se muestra solo una vez (marcado en Firestore) y se puede reabrir a mano con el botón de ayuda
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
+  // Modal de "Novedades": se muestra a usuarios ya existentes cuando hay cambios sin ver desde
+  // su último acceso (ver src/changelog.js). Los usuarios nuevos arrancan con lastSeenVersion
+  // ya al día (fijado al crear su documento), así que nunca lo ven.
+  const [changelogEntries, setChangelogEntries] = useState(null);
   const [loginForm, setLoginForm] = useState({ email: '', password: '', rememberMe: true });
   const [loginError, setLoginError] = useState('');
   const [isRegisterMode, setIsRegisterMode] = useState(false);
@@ -135,6 +141,7 @@ export function App() {
               billingCycle: 'monthly',
               planStartDate: serverTimestamp(),
               pendingPlanChange: null,
+              lastSeenVersion: APP_VERSION,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp()
             });
@@ -182,6 +189,29 @@ export function App() {
     if (firebaseUser) {
       updateDoc(doc(db, 'users', firebaseUser.uid), { hasSeenOnboarding: true, updatedAt: serverTimestamp() })
         .catch(err => console.warn('Error al guardar que se vio el tour de bienvenida:', err));
+    }
+  };
+
+  // Muestra el modal de "Novedades" a usuarios que ya conocen la app (vieron el onboarding) en
+  // cuanto detectamos que hay versiones con cambios que no ha visto todavía.
+  useEffect(() => {
+    if (!firebaseUser || !userProfile) return;
+    if (userProfile.hasSeenOnboarding !== true) return; // el tour de bienvenida ya cubre lo nuevo
+    if (userProfile.lastSeenVersion === APP_VERSION) return;
+
+    const lastSeenIndex = CHANGELOG.findIndex(c => c.version === userProfile.lastSeenVersion);
+    const entries = lastSeenIndex === -1
+      ? [CHANGELOG[CHANGELOG.length - 1]] // versión desconocida (usuarios previos a esta función): solo lo último, no todo el histórico
+      : CHANGELOG.slice(lastSeenIndex + 1);
+
+    if (entries.length > 0) setChangelogEntries(entries);
+  }, [firebaseUser, userProfile?.hasSeenOnboarding, userProfile?.lastSeenVersion]);
+
+  const closeChangelog = () => {
+    setChangelogEntries(null);
+    if (firebaseUser) {
+      updateDoc(doc(db, 'users', firebaseUser.uid), { lastSeenVersion: APP_VERSION, updatedAt: serverTimestamp() })
+        .catch(err => console.warn('Error al guardar la versión de novedades vista:', err));
     }
   };
 
@@ -3326,6 +3356,11 @@ export function App() {
       {/* TOUR DE BIENVENIDA: aparece solo la primera vez (o al pulsar el botón de ayuda) */}
       {showOnboarding && (
         <OnboardingTour step={onboardingStep} setStep={setOnboardingStep} onClose={closeOnboarding} t={t} />
+      )}
+
+      {/* MODAL DE NOVEDADES: cambios de cara al usuario desde su última visita (ver src/changelog.js) */}
+      {changelogEntries && (
+        <ChangelogModal entries={changelogEntries} language={language} onClose={closeChangelog} />
       )}
 
     </div>
