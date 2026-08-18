@@ -10,6 +10,7 @@ export const CURRENCIES = [
   { code: 'ARS', symbol: '$', label: 'Peso argentino ($)' },
   { code: 'COP', symbol: '$', label: 'Peso colombiano ($)' },
   { code: 'CLP', symbol: '$', label: 'Peso chileno ($)' },
+  { code: 'UYU', symbol: '$', label: 'Peso uruguayo ($)' },
   { code: 'BRL', symbol: 'R$', label: 'Real brasileño (R$)' },
   { code: 'CAD', symbol: '$', label: 'Dólar canadiense ($)' },
   { code: 'AUD', symbol: '$', label: 'Dólar australiano ($)' },
