@@ -7,7 +7,7 @@ import { optimizeImageFile } from '../utils/image';
 // cabecera con foto/estado, acciones rápidas, alertas programadas, historial de intervenciones
 // propio del vehículo. Puramente presentacional, sin estado propio.
 export function VehicleDetailView({
-  t, language,
+  t, language, currencySymbol,
   selectedVehicle, setSelectedVehicle,
   handleExportPDFCertificate, openEditVehicleModal, requestDeleteVehicle,
   setPhotoPreviewModal, setVehicles,
@@ -140,7 +140,7 @@ export function VehicleDetailView({
                   return (
                     <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-[11px] font-bold">
                       <TrendingUp className="w-3 h-3" />
-                      <span>{t('spent')} {vehicleSpent.toFixed(2)} €</span>
+                      <span>{t('spent')} {vehicleSpent.toFixed(2)} {currencySymbol}</span>
                     </div>
                   );
                 })()}
@@ -374,10 +374,12 @@ export function VehicleDetailView({
                 {/* Línea 3: Desglose de Precio */}
                 <div className="flex items-center justify-between pt-1 border-t border-zinc-800/40 text-[11px]">
                   <div className="font-mono text-zinc-500 text-[10px]">
-                    {(item.partsCost && item.partsCost !== '0.00 €') && (
+                    {/* Se compara el número, no el texto: "0.00 €" y "0.00 $" son ambos cero,
+                        pero solo el primero coincidiría con una comparación de string literal. */}
+                    {(parseFloat((item.partsCost || '').replace(/[^0-9.]/g, '')) || 0) > 0 && (
                       <span>Piezas: <strong className="text-zinc-400">{item.partsCost}</strong></span>
                     )}
-                    {item.laborCost && item.laborCost !== '0.00 €' && (
+                    {(parseFloat((item.laborCost || '').replace(/[^0-9.]/g, '')) || 0) > 0 && (
                       <span className="ml-2">M.O: <strong className="text-zinc-400">{item.laborCost}</strong></span>
                     )}
                   </div>

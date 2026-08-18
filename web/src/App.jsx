@@ -77,6 +77,7 @@ import {
 } from './utils/plans';
 import { toDateMs, addMonths, computeNextRenewal, getInspectionLabel, getInspectionStatus } from './utils/dates';
 import { optimizeImageFile, optimizeReceiptImage } from './utils/image';
+import { CURRENCIES, DEFAULT_CURRENCY, getCurrencySymbol } from './utils/currency';
 import { OnboardingTour } from './components/OnboardingTour';
 import { ChangelogModal } from './components/ChangelogModal';
 import { APP_VERSION, CHANGELOG } from './changelog';
@@ -703,6 +704,15 @@ export function App() {
     localStorage.setItem('garageops_language', language);
   }, [language]);
 
+  // Moneda de visualización para importes introducidos por el usuario (mantenimientos, repuestos).
+  // Sin conversión de cambio: un registro ya guardado conserva el símbolo con el que se creó, esto
+  // solo decide qué símbolo se usa para lo nuevo. Persistencia local, igual que el idioma.
+  const [currency, setCurrency] = useState(() => localStorage.getItem('garageops_currency') || DEFAULT_CURRENCY);
+  const currencySymbol = getCurrencySymbol(currency);
+  useEffect(() => {
+    localStorage.setItem('garageops_currency', currency);
+  }, [currency]);
+
   // Estado de Plan Activo y Frecuencia de Facturación
   const activeUserPlan = (userProfile?.role === 'admin' || userEmail?.toLowerCase() === 'apirezsalsa@gmail.com') 
     ? 'unlimited' 
@@ -1208,6 +1218,10 @@ export function App() {
         id: Date.now(),
         qty: initialQtyNum,
         pricePerUnit: initialPriceNum,
+        // pricePerUnit se guarda como número puro (para poder sumarlo/compararlo), así que el
+        // símbolo con el que se pagó se guarda aparte, por lote — así una compra antigua en otra
+        // moneda no cambia de símbolo si más tarde se cambia la moneda por defecto en Ajustes.
+        pricePerUnitCurrency: currencySymbol,
         supplier: newPartForm.initialSupplier || 'Taller / Tienda',
         date: newPartForm.initialDate || '2026-07-25'
       }] : [];
@@ -1266,6 +1280,7 @@ export function App() {
       id: Date.now(),
       qty: qtyNum,
       pricePerUnit: priceNum,
+      pricePerUnitCurrency: currencySymbol,
       supplier: newBatchForm.supplier || 'Proveedor Local',
       date: newBatchForm.date || '2026-07-25'
     };
@@ -1406,7 +1421,7 @@ export function App() {
     }
 
     const totalCostNum = (parseFloat(newMaintenanceForm.partsCost) || 0) + (parseFloat(newMaintenanceForm.laborCost) || 0);
-    const finalCostStr = totalCostNum > 0 ? `${totalCostNum.toFixed(2)} €` : '0.00 €';
+    const finalCostStr = totalCostNum > 0 ? `${totalCostNum.toFixed(2)} ${currencySymbol}` : `0.00 ${currencySymbol}`;
 
     const maintenanceData = {
       vehicle: targetVehicle,
@@ -1424,8 +1439,8 @@ export function App() {
       receipts: newMaintenanceForm.receipts || [],
       date: newMaintenanceForm.date || new Date().toISOString().split('T')[0],
       cost: finalCostStr,
-      partsCost: newMaintenanceForm.partsCost ? `${parseFloat(newMaintenanceForm.partsCost).toFixed(2)} €` : '0.00 €',
-      laborCost: newMaintenanceForm.laborCost ? `${parseFloat(newMaintenanceForm.laborCost).toFixed(2)} €` : '0.00 €',
+      partsCost: newMaintenanceForm.partsCost ? `${parseFloat(newMaintenanceForm.partsCost).toFixed(2)} ${currencySymbol}` : `0.00 ${currencySymbol}`,
+      laborCost: newMaintenanceForm.laborCost ? `${parseFloat(newMaintenanceForm.laborCost).toFixed(2)} ${currencySymbol}` : `0.00 ${currencySymbol}`,
       type: newMaintenanceForm.type,
       notes: newMaintenanceForm.notes || '',
       mechanic: newMaintenanceForm.mechanic || 'Taller / Propietario',
@@ -1725,9 +1740,9 @@ export function App() {
       `"${m.vehicle || ''}"`,
       `"${(m.title || '').replace(/"/g, '""')}"`,
       `"${m.type || ''}"`,
-      `"${m.laborCost || '0.00 €'}"`,
-      `"${m.partsCost || '0.00 €'}"`,
-      `"${m.cost || '0.00 €'}"`,
+      `"${m.laborCost || `0.00 ${currencySymbol}`}"`,
+      `"${m.partsCost || `0.00 ${currencySymbol}`}"`,
+      `"${m.cost || `0.00 ${currencySymbol}`}"`,
       `"${(m.notes || '').replace(/"/g, '""')}"`
     ]);
 
@@ -2158,7 +2173,7 @@ export function App() {
 
         {activeTab === 'dashboard' && !selectedVehicle && (
           <DashboardView
-            language={language} t={t}
+            language={language} t={t} currencySymbol={currencySymbol}
             vehicles={vehicles} parts={parts} maintenances={maintenances}
             setEditingMaintenanceId={setEditingMaintenanceId} blankMaintenanceForm={blankMaintenanceForm} setNewMaintenanceForm={setNewMaintenanceForm} setShowAddMaintenanceModal={setShowAddMaintenanceModal}
             setActiveTab={setActiveTab} setSelectedVehicle={setSelectedVehicle}
@@ -2168,7 +2183,7 @@ export function App() {
 
         {activeTab === 'garage' && selectedVehicle && (
           <VehicleDetailView
-            t={t} language={language}
+            t={t} language={language} currencySymbol={currencySymbol}
             selectedVehicle={selectedVehicle} setSelectedVehicle={setSelectedVehicle}
             handleExportPDFCertificate={handleExportPDFCertificate} openEditVehicleModal={openEditVehicleModal} requestDeleteVehicle={requestDeleteVehicle}
             setPhotoPreviewModal={setPhotoPreviewModal} setVehicles={setVehicles}
@@ -2183,7 +2198,7 @@ export function App() {
 
         {activeTab === 'garage' && !selectedVehicle && (
           <GarageList
-            t={t} language={language}
+            t={t} language={language} currencySymbol={currencySymbol}
             vehicles={vehicles} maintenances={maintenances}
             setEditingVehicleId={setEditingVehicleId} setNewVehicleForm={setNewVehicleForm} setShowAddVehicleModal={setShowAddVehicleModal}
             setSelectedVehicle={setSelectedVehicle}
@@ -2194,7 +2209,7 @@ export function App() {
 
         {activeTab === 'parts' && (
           <PartsView
-            t={t} language={language}
+            t={t} language={language} currencySymbol={currencySymbol}
             parts={parts}
             setEditingPartId={setEditingPartId} setNewPartForm={setNewPartForm} setShowAddPartModal={setShowAddPartModal}
             setShowBatchModal={setShowBatchModal} setNewBatchForm={setNewBatchForm}
@@ -2215,6 +2230,7 @@ export function App() {
         {activeTab === 'profile' && (
           <ProfileSettings
             language={language} setLanguage={setLanguage} t={t}
+            currency={currency} setCurrency={setCurrency}
             userEmail={userEmail} handleLogout={handleLogout}
             pushPermissionStatus={pushPermissionStatus} handleEnablePushNotifications={handleEnablePushNotifications} pushRequestInFlight={pushRequestInFlight}
             handleSendTestPush={handleSendTestPush} testPushInFlight={testPushInFlight}
@@ -2429,10 +2445,11 @@ export function App() {
                               const totalStock = parseFloat(rawStock.toFixed(3));
                               const activeBatch = purchases.find(b => b.qty > 0);
                               const unitPrice = activeBatch ? activeBatch.pricePerUnit : 0;
+                              const unitPriceCurrency = activeBatch?.pricePerUnitCurrency || '€';
                               const isCurrentSelected = String(p.id) === String(row.selectedPartId);
                               return (
                                 <option key={p.id} value={String(p.id)} disabled={totalStock <= 0 && !isCurrentSelected}>
-                                  {p.name} (Stock: {totalStock} {p.unit || 'ud'} | {unitPrice > 0 ? `${unitPrice.toFixed(2)} €/${p.unit || 'ud'}` : 'Sin precio'}) {totalStock <= 0 ? '- ¡AGOTADO!' : ''}
+                                  {p.name} (Stock: {totalStock} {p.unit || 'ud'} | {unitPrice > 0 ? `${unitPrice.toFixed(2)} ${unitPriceCurrency}/${p.unit || 'ud'}` : 'Sin precio'}) {totalStock <= 0 ? '- ¡AGOTADO!' : ''}
                                 </option>
                               );
                             })}
@@ -2518,7 +2535,7 @@ export function App() {
                 <span className="text-[11px] font-mono text-zinc-400 font-bold uppercase tracking-wider block">Desglose de Costes</span>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-zinc-400 text-[11px] mb-1">Coste Piezas (€)</label>
+                    <label className="block text-zinc-400 text-[11px] mb-1">Coste Piezas ({currencySymbol})</label>
                     <input 
                       type="number" 
                       step="0.01"
@@ -2529,7 +2546,7 @@ export function App() {
                     />
                   </div>
                   <div>
-                    <label className="block text-zinc-400 text-[11px] mb-1">Mano de Obra (€)</label>
+                    <label className="block text-zinc-400 text-[11px] mb-1">Mano de Obra ({currencySymbol})</label>
                     <input 
                       type="number" 
                       step="0.01"
@@ -3145,7 +3162,7 @@ export function App() {
                       />
                     </div>
                     <div>
-                      <label className="block text-zinc-400 text-[11px] mb-1">Precio Unitario (€)</label>
+                      <label className="block text-zinc-400 text-[11px] mb-1">Precio Unitario ({currencySymbol})</label>
                       <input 
                         type="number" 
                         step="0.01"
@@ -3240,7 +3257,7 @@ export function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-zinc-400 font-medium mb-1">Precio Unitario (€)</label>
+                  <label className="block text-zinc-400 font-medium mb-1">Precio Unitario ({currencySymbol})</label>
                   <input 
                     type="number" 
                     step="0.01"

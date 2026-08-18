@@ -2,7 +2,7 @@ import { ChevronRight, ShieldAlert } from 'lucide-react';
 import { TRANSLATIONS, translateCategory } from '../locales';
 import { getInspectionLabel, getInspectionStatus } from '../utils/dates';
 
-export function VehicleBentoCard({ vehicle, maintenances = [], language = 'es', onSelect, onOpenKmModal, onDelete }) {
+export function VehicleBentoCard({ vehicle, maintenances = [], language = 'es', currencySymbol = '€', onSelect, onOpenKmModal, onDelete }) {
   const vehicleSpent = (maintenances || [])
     .filter(m => (m.vehicle || '').toLowerCase() === (vehicle.name || '').toLowerCase())
     .reduce((sum, m) => sum + (parseFloat((m.cost || '').replace(/[^0-9.]/g, '')) || 0), 0);
@@ -46,7 +46,7 @@ export function VehicleBentoCard({ vehicle, maintenances = [], language = 'es', 
             <div className="flex items-center gap-2">
               <span className="text-xs font-mono font-bold text-orange-400">{vehicle.usage}</span>
               <span className="text-zinc-600">•</span>
-              <span className="text-xs font-mono font-bold text-emerald-400">{vehicleSpent.toFixed(2)} €</span>
+              <span className="text-xs font-mono font-bold text-emerald-400">{vehicleSpent.toFixed(2)} {currencySymbol}</span>
             </div>
           </div>
           <button

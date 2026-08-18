@@ -4,7 +4,7 @@ import { VehicleBentoCard } from './VehicleBentoCard';
 // Pantalla "Garaje" (listado): grid de vehículos + botón para añadir uno nuevo.
 // Puramente presentacional, sin estado propio.
 export function GarageList({
-  t, language,
+  t, language, currencySymbol,
   vehicles, maintenances,
   setEditingVehicleId, setNewVehicleForm, setShowAddVehicleModal,
   setSelectedVehicle,
@@ -38,6 +38,7 @@ export function GarageList({
             vehicle={v}
             maintenances={maintenances}
             language={language}
+            currencySymbol={currencySymbol}
             onSelect={() => setSelectedVehicle(v)}
             onOpenKmModal={(e) => {
               e.stopPropagation();

@@ -5,7 +5,7 @@ import { VehicleBentoCard } from './VehicleBentoCard';
 // Pantalla "Dashboard": banner + métricas + vehículos principales + últimas intervenciones +
 // notificaciones automáticas + análisis financiero. Puramente presentacional, sin estado propio.
 export function DashboardView({
-  language, t,
+  language, t, currencySymbol,
   vehicles, parts, maintenances,
   setEditingMaintenanceId, blankMaintenanceForm, setNewMaintenanceForm, setShowAddMaintenanceModal,
   setActiveTab, setSelectedVehicle,
@@ -101,7 +101,7 @@ export function DashboardView({
           return (
             <MetricBento
               title={t('totalSpent')}
-              value={`${totalSpent.toFixed(2)} €`}
+              value={`${totalSpent.toFixed(2)} ${currencySymbol}`}
               subtitle={language === 'es' ? 'Total intervenciones' : language === 'en' ? 'Total services' : language === 'it' ? 'Totale interventi' : language === 'fr' ? 'Total interventions' : language === 'de' ? 'Gesamt Einsätze' : 'Total de intervenções'}
               icon={TrendingUp}
               color="text-emerald-400"
@@ -131,6 +131,7 @@ export function DashboardView({
               vehicle={v}
               maintenances={maintenances}
               language={language}
+              currencySymbol={currencySymbol}
               onSelect={() => {
                 setSelectedVehicle(v);
                 setActiveTab('garage');
@@ -274,7 +275,7 @@ export function DashboardView({
                   <div className="space-y-1.5">
                     <div className="flex justify-between text-xs font-semibold">
                       <span className="text-zinc-400">{t('partsCostLabel')} ({partsPercent}%)</span>
-                      <span className="font-mono text-emerald-400 font-bold">{totalParts.toFixed(2)} €</span>
+                      <span className="font-mono text-emerald-400 font-bold">{totalParts.toFixed(2)} {currencySymbol}</span>
                     </div>
                     <div className="w-full bg-zinc-950 h-2.5 rounded-full overflow-hidden border border-zinc-800">
                       <div className="bg-emerald-500 h-full transition-all duration-500" style={{ width: `${partsPercent}%` }}></div>
@@ -284,7 +285,7 @@ export function DashboardView({
                   <div className="space-y-1.5">
                     <div className="flex justify-between text-xs font-semibold">
                       <span className="text-zinc-400">{t('laborCost')} ({laborPercent}%)</span>
-                      <span className="font-mono text-orange-400 font-bold">{totalLabor.toFixed(2)} €</span>
+                      <span className="font-mono text-orange-400 font-bold">{totalLabor.toFixed(2)} {currencySymbol}</span>
                     </div>
                     <div className="w-full bg-zinc-950 h-2.5 rounded-full overflow-hidden border border-zinc-800">
                       <div className="bg-orange-500 h-full transition-all duration-500" style={{ width: `${laborPercent}%` }}></div>

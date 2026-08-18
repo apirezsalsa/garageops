@@ -6,7 +6,7 @@ import { Plus, Search, ChevronRight } from 'lucide-react';
 // papelera). Los modales de Añadir/Editar Repuesto y de Añadir Lote viven en App() (compartidos
 // también desde el modal de mantenimiento), así que solo se disparan aquí vía props.
 export function PartsView({
-  t, language,
+  t, language, currencySymbol,
   parts,
   setEditingPartId, setNewPartForm, setShowAddPartModal,
   setShowBatchModal, setNewBatchForm,
@@ -80,8 +80,8 @@ export function PartsView({
             const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
             const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
             const priceLabel = minPrice === maxPrice
-              ? `${minPrice.toFixed(2)} €`
-              : `${minPrice.toFixed(2)} € - ${maxPrice.toFixed(2)} €`;
+              ? `${minPrice.toFixed(2)} ${currencySymbol}`
+              : `${minPrice.toFixed(2)} ${currencySymbol} - ${maxPrice.toFixed(2)} ${currencySymbol}`;
 
             const isExpanded = selectedPartForBatches === p.id;
 
@@ -178,7 +178,7 @@ export function PartsView({
                               </div>
                             </div>
                             <span className="font-mono font-bold text-zinc-100 bg-zinc-800 px-2.5 py-1 rounded-lg border border-zinc-700">
-                              {b.pricePerUnit.toFixed(2)} € / {p.unit || 'ud'}
+                              {b.pricePerUnit.toFixed(2)} {b.pricePerUnitCurrency || '€'} / {p.unit || 'ud'}
                             </span>
                           </div>
                         ))}

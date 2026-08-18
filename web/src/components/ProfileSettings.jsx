@@ -1,11 +1,13 @@
-import { User, SlidersHorizontal, Bell, CheckCircle2, Zap, FileText, ArrowUpRight } from 'lucide-react';
+import { User, SlidersHorizontal, Coins, Bell, CheckCircle2, Zap, FileText, ArrowUpRight } from 'lucide-react';
 import { getLocalizedPlanList, PAYMENT_GATEWAY_ENABLED } from '../utils/plans';
+import { CURRENCIES } from '../utils/currency';
 
 // Pantalla "Ajustes & Suscripción": idioma, notificaciones push, plan SaaS/facturación,
 // historial de pagos propio y copias de seguridad. Puramente presentacional — sin estado propio,
 // toda la lógica vive en App() y se recibe como props.
 export function ProfileSettings({
   language, setLanguage, t,
+  currency, setCurrency,
   userEmail, handleLogout,
   pushPermissionStatus, handleEnablePushNotifications, pushRequestInFlight,
   handleSendTestPush, testPushInFlight,
@@ -97,6 +99,34 @@ export function ProfileSettings({
             </button>
           ))}
         </div>
+      </div>
+
+      {/* SECTOR: MONEDA — solo cambia el símbolo mostrado, sin conversión de cambio. Un importe ya
+          registrado conserva el símbolo con el que se creó; esto solo afecta a lo nuevo. */}
+      <div className="bg-zinc-900/80 p-6 rounded-3xl border border-zinc-800 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400">
+            <Coins className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="font-bold text-sm text-white">
+              {language === 'es' ? 'Moneda' : language === 'en' ? 'Currency' : language === 'it' ? 'Valuta' : language === 'fr' ? 'Devise' : language === 'de' ? 'Währung' : 'Moeda'}
+            </h3>
+            <p className="text-[11px] text-zinc-400">
+              {language === 'es' ? 'En qué moneda registras costes de mantenimiento y repuestos' : language === 'en' ? 'The currency used for maintenance and parts costs' : language === 'it' ? 'La valuta usata per costi di manutenzione e ricambi' : language === 'fr' ? 'La devise pour les coûts de maintenance et de pièces' : language === 'de' ? 'Die Währung für Wartungs- und Ersatzteilkosten' : 'A moeda usada para custos de manutenção e peças'}
+            </p>
+          </div>
+        </div>
+
+        <select
+          value={currency}
+          onChange={(e) => setCurrency(e.target.value)}
+          className="w-full bg-zinc-950/60 border border-zinc-800 rounded-2xl p-3 text-sm font-bold text-zinc-200 outline-none focus:border-orange-500"
+        >
+          {CURRENCIES.map((c) => (
+            <option key={c.code} value={c.code}>{c.label}</option>
+          ))}
+        </select>
       </div>
 
       {/* SECTOR: NOTIFICACIONES PUSH */}
