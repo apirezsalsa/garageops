@@ -91,6 +91,7 @@ import { GarageList } from './components/GarageList';
 import { PartsView } from './components/PartsView';
 import { DashboardView } from './components/DashboardView';
 import { VehicleDetailView } from './components/VehicleDetailView';
+import { identifyUser, resetAnalyticsUser, trackEvent } from './analytics';
 
 export { PLAN_COLOR_STYLES };
 
@@ -166,6 +167,7 @@ export function App() {
               data.plan = 'unlimited';
             }
             setUserProfile(data);
+            identifyUser(user.uid, { email: data.email, plan: data.plan, role: data.role });
           }
         }, (e) => console.warn('Error al leer perfil de Firestore:', e));
         return () => unsubProfile();
@@ -184,7 +186,14 @@ export function App() {
     }
   }, [firebaseUser, userProfile?.hasSeenOnboarding]);
 
+  // Embudo de onboarding: qué paso ve cada usuario, para detectar en qué pantalla abandonan
+  const ONBOARDING_LAST_STEP = 4;
+  useEffect(() => {
+    if (showOnboarding) trackEvent('onboarding_step_viewed', { step: onboardingStep });
+  }, [showOnboarding, onboardingStep]);
+
   const closeOnboarding = () => {
+    trackEvent(onboardingStep >= ONBOARDING_LAST_STEP ? 'onboarding_completed' : 'onboarding_skipped', { step: onboardingStep });
     setShowOnboarding(false);
     if (firebaseUser) {
       updateDoc(doc(db, 'users', firebaseUser.uid), { hasSeenOnboarding: true, updatedAt: serverTimestamp() })
@@ -423,6 +432,7 @@ export function App() {
   };
 
   const handleLogout = async () => {
+    resetAnalyticsUser();
     await signOut(auth);
   };
 
@@ -588,6 +598,7 @@ export function App() {
     }, (err) => console.warn('Firestore transactions listener fallback:', err));
     return () => unsubTransactions();
   }, [firebaseUser, isSuperAdmin]);
+
 
   // Historial de pagos del propio usuario, para mostrar en "Ajustes & Suscripción"
   const [myTransactions, setMyTransactions] = useState([]);
@@ -814,6 +825,7 @@ export function App() {
     if (!firebaseUser) return;
     const targetPlanDef = plansById[targetPlanId];
     if (!PAYMENT_GATEWAY_ENABLED && (targetPlanDef?.priceMonthly || 0) > 0) {
+      trackEvent('paywall_hit', { context: 'plan_selection', plan: currentPlan, targetPlan: targetPlanId });
       setNoticeModal({
         title: language === 'es' ? 'Mejora de Plan Aún No Disponible' : language === 'en' ? 'Plan Upgrade Not Available Yet' : language === 'it' ? 'Aggiornamento Piano Non Disponibile' : language === 'fr' ? 'Mise à Niveau du Plan Pas Encore Disponible' : language === 'de' ? 'Plan-Upgrade Noch Nicht Verfügbar' : 'Atualização de Plano Ainda Não Disponível',
         message: language === 'es'
@@ -833,6 +845,7 @@ export function App() {
     }
     // Con la pasarela activa, contratar un plan de pago nuevo se hace vía Stripe Checkout, no por escritura directa en Firestore
     if (PAYMENT_GATEWAY_ENABLED && (targetPlanDef?.priceMonthly || 0) > 0) {
+      trackEvent('paywall_hit', { context: 'plan_selection', plan: currentPlan, targetPlan: targetPlanId });
       handleStripeCheckout(targetPlanId, targetBillingCycle);
       return;
     }
@@ -1010,6 +1023,7 @@ export function App() {
 
     // Validación de límites según el plan
     if (vehicles.length >= maxVehiclesAllowed) {
+      trackEvent('paywall_hit', { context: 'add_vehicle_limit', plan: currentPlan, maxVehicles: maxVehiclesAllowed });
       setNoticeModal({
         title: 'Límite de Vehículos Alcanzado',
         message: language === 'es'
@@ -1047,6 +1061,7 @@ export function App() {
     };
 
     await firestoreAdd('vehicles', newVehicle);
+    trackEvent('vehicle_added', { category: newVehicle.category });
     setShowAddVehicleModal(false);
     setNewVehicleForm({ name: '', category: 'Mantenimiento por Km', unit: 'km', icon: '🏍️', photo: '', usageNum: '', nextInspectionDate: '', licensePlate: '', insuranceCompany: '' });
   };
@@ -1200,6 +1215,7 @@ export function App() {
       };
 
       const newPartId = await firestoreAdd('parts', newPart);
+      trackEvent('part_added');
 
       // Si este repuesto se creó desde una fila de "Piezas Usadas" del modal de mantenimiento
       // (el usuario pulsó "Rellenar ficha completa"), vincula esa fila al repuesto recién creado
@@ -1410,6 +1426,7 @@ export function App() {
       await firestoreUpdate('maintenances', editingMaintenanceId, maintenanceData);
     } else {
       await firestoreAdd('maintenances', maintenanceData);
+      trackEvent('maintenance_added', { category: maintenanceData.category });
     }
 
     // Si se especificó una nueva lectura de uso, actualizar el vehículo en Firestore
@@ -1438,6 +1455,7 @@ export function App() {
 
   // --- FUNCIONES DE EXPORTACIÓN PDF / CSV / BACKUP JSON & NOTIFICACIONES ---
   const handleExportPDFCertificate = (targetVehicleObj = null) => {
+    trackEvent('export_pdf');
     const veh = targetVehicleObj || selectedVehicle;
     const vehName = veh ? veh.name : 'Flota Completa';
     const listToExport = veh 
@@ -1663,6 +1681,7 @@ export function App() {
   };
 
   const handleExportJSON = () => {
+    trackEvent('export_json');
     const backupData = {
       version: '1.0',
       timestamp: new Date().toISOString(),
@@ -1681,6 +1700,7 @@ export function App() {
   };
 
   const handleExportCSV = () => {
+    trackEvent('export_csv');
     const headers = ["ID", "Fecha", "Vehiculo", "Titulo", "Tipo", "ManoDeObra", "PiezasCoste", "CosteTotal", "Notas"];
     const rows = maintenances.map(m => [
       m.id,

@@ -1,5 +1,5 @@
 import React from 'react';
-import { reportError } from './monitoring';
+import { reportError } from './analytics';
 
 export class ErrorBoundary extends React.Component {
   state = { hasError: false };

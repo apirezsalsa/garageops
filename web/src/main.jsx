@@ -2,10 +2,10 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import { ErrorBoundary } from './ErrorBoundary';
-import { initErrorMonitoring } from './monitoring';
+import { initAnalytics } from './analytics';
 import './style.css';
 
-initErrorMonitoring();
+initAnalytics();
 
 ReactDOM.createRoot(document.getElementById('app')).render(
   <React.StrictMode>

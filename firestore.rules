@@ -97,15 +97,5 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Reglas para errorLogs (monitorización de errores del frontend, ver src/monitoring.js).
-    // Cualquiera puede crear un log (incluso sin sesión: un error puede ocurrir antes de iniciar sesión),
-    // pero solo con la forma esperada. Solo los admins pueden leerlos; nadie puede modificarlos ni borrarlos.
-    match /errorLogs/{logId} {
-      allow create: if request.resource.data.keys().hasOnly(['message', 'stack', 'url', 'userAgent', 'uid', 'extra', 'createdAt'])
-        && request.resource.data.message is string
-        && request.resource.data.message.size() <= 500;
-      allow read: if isAdmin();
-      allow update, delete: if false;
-    }
   }
 }
