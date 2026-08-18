@@ -897,6 +897,9 @@ export function App() {
   const [editingVehicleId, setEditingVehicleId] = useState(null);
   const [showKmModal, setShowKmModal] = useState(null);
   const [newKmValue, setNewKmValue] = useState('');
+  // Lectura secundaria opcional del vehículo (p.ej. km en una moto de enduro que lleva las horas
+  // como medidor principal). Es solo informativa: no genera alertas ni tiene su propio historial.
+  const [newSecondaryKmValue, setNewSecondaryKmValue] = useState('');
 
   // Estado para Modal de Alertas Programadas por Vehículo
   const [showAlertModal, setShowAlertModal] = useState(null); // guarda el vehículo target
@@ -1071,22 +1074,27 @@ export function App() {
     if (!showKmModal) return;
 
     const newNum = parseFloat(newKmValue) || 0;
+    const secondaryNum = newSecondaryKmValue !== '' ? parseFloat(newSecondaryKmValue) : null;
+    const secondaryValid = secondaryNum !== null && !isNaN(secondaryNum);
 
     await firestoreUpdate('vehicles', showKmModal.id, {
       usage: `${newNum} ${showKmModal.unit}`,
-      usageNum: newNum
+      usageNum: newNum,
+      secondaryUsageNum: secondaryValid ? secondaryNum : null
     });
 
     if (selectedVehicle && selectedVehicle.id === showKmModal.id) {
       setSelectedVehicle(prev => ({
         ...prev,
         usage: `${newNum} ${prev.unit}`,
-        usageNum: newNum
+        usageNum: newNum,
+        secondaryUsageNum: secondaryValid ? secondaryNum : null
       }));
     }
 
     setShowKmModal(null);
     setNewKmValue('');
+    setNewSecondaryKmValue('');
   };
 
   // Estado para Modal Personalizado de Confirmación de Borrado
@@ -1299,6 +1307,7 @@ export function App() {
     title: '',
     category: 'Motor & Transmisión',
     usageAtService: '',
+    secondaryReading: '',
     partsUsed: [{ selectedPartId: '', manualName: '', partNumber: '', qty: '1' }],
     receipts: [],
     partsCost: '',
@@ -1404,6 +1413,13 @@ export function App() {
       title: newMaintenanceForm.title,
       category: newMaintenanceForm.category,
       usageAtService: newMaintenanceForm.usageAtService ? `${newMaintenanceForm.usageAtService} ${currentVehObj?.unit || 'km'}` : currentVehObj?.usage || '',
+      // Lectura secundaria opcional: el vehículo lleva un medidor principal (km u horas), pero
+      // algunos mantenimientos también necesitan anotar el otro (p.ej. una moto de enduro que
+      // controla horas de motor, pero donde también interesa dejar constancia del kilometraje).
+      // No es un contador que lleve la app ni genera alertas, solo queda anotado en el registro.
+      secondaryReading: newMaintenanceForm.secondaryReading
+        ? `${newMaintenanceForm.secondaryReading} ${currentVehObj?.unit === 'hrs' ? 'km' : 'hrs'}`
+        : '',
       partsUsed: builtPartsUsed,
       receipts: newMaintenanceForm.receipts || [],
       date: newMaintenanceForm.date || new Date().toISOString().split('T')[0],
@@ -1505,7 +1521,7 @@ export function App() {
         <div class="veh-info">
           <div>
             <h2>${veh ? veh.name : 'Informe de Flota Completa'}</h2>
-            ${veh ? `<p><strong>Categoría:</strong> ${veh.category} &nbsp;|&nbsp; <strong>Lectura Actual:</strong> ${veh.usage}</p>` : ''}
+            ${veh ? `<p><strong>Categoría:</strong> ${veh.category} &nbsp;|&nbsp; <strong>Lectura Actual:</strong> ${veh.usage}${veh.secondaryUsageNum != null ? ` (${veh.secondaryUsageNum} ${veh.unit === 'hrs' ? 'km' : 'hrs'})` : ''}</p>` : ''}
           </div>
           <p><strong>Fecha:</strong> ${new Date().toLocaleDateString()}</p>
         </div>
@@ -1620,6 +1636,7 @@ export function App() {
           ${row('Categoría', item.category)}
           ${row('Taller / Mecánico', item.mechanic)}
           ${row('Lectura del Vehículo', item.usageAtService)}
+          ${row('Lectura Adicional', item.secondaryReading)}
           ${row('Coste de Repuestos', item.partsCost)}
           ${row('Coste de Mano de Obra', item.laborCost)}
           <tr>
@@ -1764,6 +1781,7 @@ export function App() {
       title: item.title,
       category: item.category || 'Motor & Transmisión',
       usageAtService: item.usageAtService ? item.usageAtService.replace(/[^0-9.]/g, '') : '',
+      secondaryReading: item.secondaryReading ? item.secondaryReading.replace(/[^0-9.]/g, '') : '',
       partsUsed: partsUsedRows,
       receipts: item.receipts || [],
       partsCost: item.partsCost ? item.partsCost.replace(/[^0-9.]/g, '') : '',
@@ -2144,7 +2162,7 @@ export function App() {
             vehicles={vehicles} parts={parts} maintenances={maintenances}
             setEditingMaintenanceId={setEditingMaintenanceId} blankMaintenanceForm={blankMaintenanceForm} setNewMaintenanceForm={setNewMaintenanceForm} setShowAddMaintenanceModal={setShowAddMaintenanceModal}
             setActiveTab={setActiveTab} setSelectedVehicle={setSelectedVehicle}
-            setShowKmModal={setShowKmModal} setNewKmValue={setNewKmValue}
+            setShowKmModal={setShowKmModal} setNewKmValue={setNewKmValue} setNewSecondaryKmValue={setNewSecondaryKmValue}
           />
         )}
 
@@ -2156,7 +2174,7 @@ export function App() {
             setPhotoPreviewModal={setPhotoPreviewModal} setVehicles={setVehicles}
             maintenances={maintenances}
             setShowAlertModal={setShowAlertModal} setNewAlertForm={setNewAlertForm}
-            setShowKmModal={setShowKmModal} setNewKmValue={setNewKmValue}
+            setShowKmModal={setShowKmModal} setNewKmValue={setNewKmValue} setNewSecondaryKmValue={setNewSecondaryKmValue}
             setEditingMaintenanceId={setEditingMaintenanceId} blankMaintenanceForm={blankMaintenanceForm} setNewMaintenanceForm={setNewMaintenanceForm} setShowAddMaintenanceModal={setShowAddMaintenanceModal}
             handleDeleteVehicleAlert={handleDeleteVehicleAlert}
             handleEditMaintenance={handleEditMaintenance}
@@ -2169,7 +2187,7 @@ export function App() {
             vehicles={vehicles} maintenances={maintenances}
             setEditingVehicleId={setEditingVehicleId} setNewVehicleForm={setNewVehicleForm} setShowAddVehicleModal={setShowAddVehicleModal}
             setSelectedVehicle={setSelectedVehicle}
-            setShowKmModal={setShowKmModal} setNewKmValue={setNewKmValue}
+            setShowKmModal={setShowKmModal} setNewKmValue={setNewKmValue} setNewSecondaryKmValue={setNewSecondaryKmValue}
             requestDeleteVehicle={requestDeleteVehicle}
           />
         )}
@@ -2315,18 +2333,37 @@ export function App() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
                   <label className="block text-zinc-400 font-medium mb-1">Lectura (Km/Hrs)</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     step="0.1"
-                    placeholder="Ej: 48.5" 
+                    placeholder="Ej: 48.5"
                     value={newMaintenanceForm.usageAtService}
                     onChange={(e) => setNewMaintenanceForm({ ...newMaintenanceForm, usageAtService: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-mono" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-mono"
                   />
                 </div>
+                {(() => {
+                  const formVehObj = vehicles.find(v => v.name === newMaintenanceForm.vehicle);
+                  const secondaryUnit = formVehObj?.unit === 'hrs' ? 'km' : 'hrs';
+                  return (
+                    <div>
+                      <label className="block text-zinc-400 font-medium mb-1">
+                        {secondaryUnit === 'km' ? 'Km' : 'Horas'} (opcional)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        placeholder={secondaryUnit === 'km' ? 'Ej: 12500' : 'Ej: 48.5'}
+                        value={newMaintenanceForm.secondaryReading}
+                        onChange={(e) => setNewMaintenanceForm({ ...newMaintenanceForm, secondaryReading: e.target.value })}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-mono"
+                      />
+                    </div>
+                  );
+                })()}
                 <div>
                   <label className="block text-zinc-400 font-medium mb-1">Tipo Servicio</label>
                   <select 
@@ -2340,7 +2377,7 @@ export function App() {
                     <option value="Correctivo">Correctivo</option>
                   </select>
                 </div>
-                <div className="col-span-2 sm:col-span-1">
+                <div>
                   <label className="block text-zinc-400 font-medium mb-1">Fecha</label>
                   <input 
                     type="date" 
@@ -2923,6 +2960,28 @@ export function App() {
                   </button>
                 </div>
               </div>
+
+              {(() => {
+                const secondaryUnit = showKmModal.unit === 'hrs' ? 'km' : 'hrs';
+                return (
+                  <div>
+                    <label className="block text-zinc-400 font-medium mb-1">
+                      {secondaryUnit === 'km' ? 'Km' : 'Horas'} (opcional)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="0.1"
+                        placeholder={secondaryUnit === 'km' ? 'Ej: 12500' : 'Ej: 48.5'}
+                        value={newSecondaryKmValue}
+                        onChange={(e) => setNewSecondaryKmValue(e.target.value)}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-mono"
+                      />
+                      <span className="absolute right-3 top-3.5 text-xs text-zinc-500 font-mono uppercase pointer-events-none">{secondaryUnit}</span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="pt-2">
                 <button type="submit" className="w-full py-3.5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm transition-all shadow-lg shadow-orange-500/25 active:scale-95">

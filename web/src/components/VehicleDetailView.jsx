@@ -13,7 +13,7 @@ export function VehicleDetailView({
   setPhotoPreviewModal, setVehicles,
   maintenances,
   setShowAlertModal, setNewAlertForm,
-  setShowKmModal, setNewKmValue,
+  setShowKmModal, setNewKmValue, setNewSecondaryKmValue,
   setEditingMaintenanceId, blankMaintenanceForm, setNewMaintenanceForm, setShowAddMaintenanceModal,
   handleDeleteVehicleAlert,
   handleEditMaintenance,
@@ -127,6 +127,11 @@ export function VehicleDetailView({
                   <Gauge className="w-3 h-3" />
                   <span>{t('usage')} {selectedVehicle.usage}</span>
                 </div>
+                {selectedVehicle.secondaryUsageNum != null && (
+                  <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-zinc-950/80 border border-zinc-800/60 text-zinc-400 font-mono text-[11px] font-semibold">
+                    <span>{selectedVehicle.secondaryUsageNum} {selectedVehicle.unit === 'hrs' ? 'km' : 'hrs'}</span>
+                  </div>
+                )}
                 {(() => {
                   const vehicleSpent = maintenances
                     .filter(m => (m.vehicle || '').toLowerCase() === (selectedVehicle.name || '').toLowerCase())
@@ -184,6 +189,7 @@ export function VehicleDetailView({
             onClick={() => {
               setShowKmModal(selectedVehicle);
               setNewKmValue((selectedVehicle.usageNum || 0).toString());
+              setNewSecondaryKmValue(selectedVehicle.secondaryUsageNum != null ? String(selectedVehicle.secondaryUsageNum) : '');
             }}
             className="px-3 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold text-xs transition-all border border-zinc-700 flex items-center justify-center gap-1.5"
           >
@@ -349,6 +355,12 @@ export function VehicleDetailView({
                     <>
                       <span>•</span>
                       <span className="font-mono text-zinc-300">Uso: {item.usageAtService}</span>
+                    </>
+                  )}
+                  {item.secondaryReading && (
+                    <>
+                      <span>•</span>
+                      <span className="font-mono text-zinc-500">{item.secondaryReading}</span>
                     </>
                   )}
                   {item.mechanic && (

@@ -9,7 +9,7 @@ export function DashboardView({
   vehicles, parts, maintenances,
   setEditingMaintenanceId, blankMaintenanceForm, setNewMaintenanceForm, setShowAddMaintenanceModal,
   setActiveTab, setSelectedVehicle,
-  setShowKmModal, setNewKmValue,
+  setShowKmModal, setNewKmValue, setNewSecondaryKmValue,
 }) {
   return (
     <div className="space-y-6">
@@ -139,6 +139,7 @@ export function DashboardView({
                 e.stopPropagation();
                 setShowKmModal(v);
                 setNewKmValue((v.usageNum || 0).toString());
+                setNewSecondaryKmValue(v.secondaryUsageNum != null ? String(v.secondaryUsageNum) : '');
               }}
             />
           ))}

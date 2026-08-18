@@ -8,7 +8,7 @@ export function GarageList({
   vehicles, maintenances,
   setEditingVehicleId, setNewVehicleForm, setShowAddVehicleModal,
   setSelectedVehicle,
-  setShowKmModal, setNewKmValue,
+  setShowKmModal, setNewKmValue, setNewSecondaryKmValue,
   requestDeleteVehicle,
 }) {
   return (
@@ -43,6 +43,7 @@ export function GarageList({
               e.stopPropagation();
               setShowKmModal(v);
               setNewKmValue((v.usageNum || 0).toString());
+              setNewSecondaryKmValue(v.secondaryUsageNum != null ? String(v.secondaryUsageNum) : '');
             }}
             onDelete={requestDeleteVehicle}
           />
