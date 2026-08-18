@@ -17,7 +17,12 @@ export function initAnalytics() {
     capture_pageview: true,
     autocapture: true,
     capture_exceptions: true,
+    // Cookie en .mygarageops.com, no solo en app.: así quien llegó por la landing sigue siendo
+    // el mismo visitante al registrarse aquí y el embudo visita → registro se ve entero.
+    // Es el valor por defecto, pero se deja explícito porque sin esto el embudo se rompe.
+    cross_subdomain_cookie: true,
   });
+  posthog.register({ site: 'app' });
 }
 
 export function identifyUser(uid, props) {
