@@ -18,12 +18,7 @@
       "target": "landing",
       "public": "mygarageops-landing/dist",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-      "rewrites": [
-        {
-          "source": "**",
-          "destination": "/index.html"
-        }
-      ],
+      "cleanUrls": true,
       "headers": [
         {
           "source": "**",
