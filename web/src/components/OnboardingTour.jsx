@@ -16,7 +16,7 @@ export function OnboardingTour({ step, setStep, onClose, t }) {
       <div className="w-full max-w-sm bg-zinc-900 rounded-3xl border border-zinc-800 p-6 shadow-2xl animate-in zoom-in-95 duration-150 relative">
         <button
           type="button"
-          onClick={onClose}
+          onClick={() => onClose(false)}
           className="absolute top-4 right-4 w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center transition-colors"
         >
           <X className="w-4 h-4" />
@@ -47,7 +47,7 @@ export function OnboardingTour({ step, setStep, onClose, t }) {
           ) : (
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => onClose(false)}
               className="flex-1 py-2.5 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs transition-all active:scale-95"
             >
               {t('onboardingSkip')}
@@ -55,7 +55,7 @@ export function OnboardingTour({ step, setStep, onClose, t }) {
           )}
           <button
             type="button"
-            onClick={() => (isLast ? onClose() : setStep(s => s + 1))}
+            onClick={() => (isLast ? onClose(true) : setStep(s => s + 1))}
             className="flex-1 py-2.5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-orange-500/25 transition-all active:scale-95"
           >
             {isLast ? t('onboardingFinish') : t('onboardingNext')}

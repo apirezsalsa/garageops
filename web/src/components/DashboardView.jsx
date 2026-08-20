@@ -10,6 +10,7 @@ export function DashboardView({
   setEditingMaintenanceId, blankMaintenanceForm, setNewMaintenanceForm, setShowAddMaintenanceModal,
   setActiveTab, setSelectedVehicle,
   setShowKmModal, setNewKmValue, setNewSecondaryKmValue,
+  openAddVehicleModal,
 }) {
   return (
     <div className="space-y-6">
@@ -33,17 +34,27 @@ export function DashboardView({
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setEditingMaintenanceId(null);
-                setNewMaintenanceForm(blankMaintenanceForm());
-                setShowAddMaintenanceModal(true);
-              }}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs sm:text-sm transition-all shadow-lg shadow-orange-500/25 active:scale-95"
-            >
-              <Plus className="w-4 h-4 stroke-[3]" />
-              <span>{t('addIntervention')}</span>
-            </button>
+            {vehicles.length === 0 ? (
+              <button
+                onClick={openAddVehicleModal}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs sm:text-sm transition-all shadow-lg shadow-orange-500/25 active:scale-95"
+              >
+                <Plus className="w-4 h-4 stroke-[3]" />
+                <span>{t('addVehicleBtn')}</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  setEditingMaintenanceId(null);
+                  setNewMaintenanceForm(blankMaintenanceForm());
+                  setShowAddMaintenanceModal(true);
+                }}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs sm:text-sm transition-all shadow-lg shadow-orange-500/25 active:scale-95"
+              >
+                <Plus className="w-4 h-4 stroke-[3]" />
+                <span>{t('addIntervention')}</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -119,32 +130,53 @@ export function DashboardView({
               {language === 'es' ? 'Vehículos Principales' : language === 'en' ? 'Main Vehicles' : language === 'it' ? 'Veicoli Principali' : language === 'fr' ? 'Véhicules Principaux' : language === 'de' ? 'Hauptfahrzeuge' : 'Veículos Principais'}
             </h3>
           </div>
-          <button onClick={() => setActiveTab('garage')} className="text-xs text-orange-400 hover:text-orange-300 font-semibold flex items-center gap-1">
-            {language === 'es' ? 'Ver Garaje completo' : language === 'en' ? 'View Full Garage' : language === 'it' ? 'Vedi Garage completo' : language === 'fr' ? 'Voir le Garage complet' : language === 'de' ? 'Ganze Garage ansehen' : 'Ver Garagem completa'} <ArrowUpRight className="w-3.5 h-3.5" />
-          </button>
+          {vehicles.length > 0 && (
+            <button onClick={() => setActiveTab('garage')} className="text-xs text-orange-400 hover:text-orange-300 font-semibold flex items-center gap-1">
+              {language === 'es' ? 'Ver Garaje completo' : language === 'en' ? 'View Full Garage' : language === 'it' ? 'Vedi Garage completo' : language === 'fr' ? 'Voir le Garage complet' : language === 'de' ? 'Ganze Garage ansehen' : 'Ver Garagem completa'} <ArrowUpRight className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {vehicles.map((v) => (
-            <VehicleBentoCard
-              key={v.id}
-              vehicle={v}
-              maintenances={maintenances}
-              language={language}
-              currencySymbol={currencySymbol}
-              onSelect={() => {
-                setSelectedVehicle(v);
-                setActiveTab('garage');
-              }}
-              onOpenKmModal={(e) => {
-                e.stopPropagation();
-                setShowKmModal(v);
-                setNewKmValue((v.usageNum || 0).toString());
-                setNewSecondaryKmValue(v.secondaryUsageNum != null ? String(v.secondaryUsageNum) : '');
-              }}
-            />
-          ))}
-        </div>
+        {vehicles.length === 0 ? (
+          <div className="bg-zinc-900/60 rounded-3xl border border-dashed border-zinc-800 p-8 sm:p-10 text-center flex flex-col items-center justify-center shadow-xl">
+            <div className="w-16 h-16 rounded-3xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400 mb-4 shadow-lg shadow-orange-500/10">
+              <Bike className="w-8 h-8 stroke-[1.75]" />
+            </div>
+            <h4 className="text-lg font-bold text-white mb-2">{t('emptyGarageTitle')}</h4>
+            <p className="text-xs sm:text-sm text-zinc-400 max-w-md mb-6 leading-relaxed">
+              {t('emptyGarageDesc')}
+            </p>
+            <button
+              onClick={openAddVehicleModal}
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs sm:text-sm shadow-lg shadow-orange-500/25 transition-all active:scale-95"
+            >
+              <Plus className="w-4 h-4 stroke-[3]" />
+              <span>{t('addFirstVehicleBtn')}</span>
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {vehicles.map((v) => (
+              <VehicleBentoCard
+                key={v.id}
+                vehicle={v}
+                maintenances={maintenances}
+                language={language}
+                currencySymbol={currencySymbol}
+                onSelect={() => {
+                  setSelectedVehicle(v);
+                  setActiveTab('garage');
+                }}
+                onOpenKmModal={(e) => {
+                  e.stopPropagation();
+                  setShowKmModal(v);
+                  setNewKmValue((v.usageNum || 0).toString());
+                  setNewSecondaryKmValue(v.secondaryUsageNum != null ? String(v.secondaryUsageNum) : '');
+                }}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* BENTO SECTION: RECIENTES MANTENIMIENTOS */}
@@ -156,39 +188,50 @@ export function DashboardView({
               {language === 'es' ? 'Últimas Intervenciones Registradas' : language === 'en' ? 'Recent Service Records' : language === 'it' ? 'Ultimi Interventi Registrati' : language === 'fr' ? 'Dernières Interventions Enregistrées' : language === 'de' ? 'Zuletzt Erfasste Einsätze' : 'Últimas Intervenções Registadas'}
             </h3>
           </div>
-          <button onClick={() => setActiveTab('history')} className="text-xs text-orange-400 hover:text-orange-300 font-semibold flex items-center gap-1">
-            {language === 'es' ? 'Ver Historial' : language === 'en' ? 'View History' : language === 'it' ? 'Vedi Cronologia' : language === 'fr' ? 'Voir l\'Historique' : language === 'de' ? 'Verlauf ansehen' : 'Ver Histórico'} <ArrowUpRight className="w-3.5 h-3.5" />
-          </button>
+          {maintenances.length > 0 && (
+            <button onClick={() => setActiveTab('history')} className="text-xs text-orange-400 hover:text-orange-300 font-semibold flex items-center gap-1">
+              {language === 'es' ? 'Ver Historial' : language === 'en' ? 'View History' : language === 'it' ? 'Vedi Cronologia' : language === 'fr' ? 'Voir l\'Historique' : language === 'de' ? 'Verlauf ansehen' : 'Ver Histórico'} <ArrowUpRight className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
-        <div className="bg-zinc-900/60 rounded-3xl border border-zinc-800/80 divide-y divide-zinc-800/60 overflow-hidden shadow-xl">
-          {maintenances.map((item) => (
-            <div key={item.id} className="p-4 sm:p-5 flex items-center justify-between hover:bg-zinc-800/40 transition-colors">
-              <div className="flex items-center gap-3.5">
-                <div className="w-10 h-10 rounded-2xl bg-zinc-800/80 border border-zinc-700/50 flex items-center justify-center text-orange-400 shrink-0">
-                  <Wrench className="w-5 h-5 stroke-[2]" />
-                </div>
-                <div>
-                  <p className="text-xs sm:text-sm font-bold text-zinc-100">{item.title}</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-[11px] text-zinc-400 font-medium">{item.vehicle}</span>
-                    <span className="text-zinc-600">•</span>
-                    <span className="text-[11px] font-mono text-zinc-500">{item.date}</span>
+        {maintenances.length === 0 ? (
+          <div className="bg-zinc-900/60 rounded-3xl border border-dashed border-zinc-800/80 p-6 text-center text-xs text-zinc-500">
+            {vehicles.length === 0
+              ? (language === 'es' ? 'Añade tu primer vehículo para comenzar a registrar intervenciones.' : language === 'en' ? 'Add your first vehicle to start logging maintenance records.' : language === 'it' ? 'Aggiungi il tuo primo veicolo per iniziare a registrare manutenzioni.' : language === 'fr' ? 'Ajoutez votre premier véhicule pour commencer à enregistrer des entretiens.' : language === 'de' ? 'Füge dein erstes Fahrzeug hinzu, um mit der Wartungserfassung zu beginnen.' : 'Adicione o seu primeiro veículo para começar a registar intervenções.')
+              : (language === 'es' ? 'No hay intervenciones registradas todavía.' : language === 'en' ? 'No service records registered yet.' : language === 'it' ? 'Nessun intervento registrato.' : language === 'fr' ? 'Aucune intervention enregistrée.' : language === 'de' ? 'Noch keine Einsätze erfasst.' : 'Sem intervenções registadas.')
+            }
+          </div>
+        ) : (
+          <div className="bg-zinc-900/60 rounded-3xl border border-zinc-800/80 divide-y divide-zinc-800/60 overflow-hidden shadow-xl">
+            {maintenances.map((item) => (
+              <div key={item.id} className="p-4 sm:p-5 flex items-center justify-between hover:bg-zinc-800/40 transition-colors">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-2xl bg-zinc-800/80 border border-zinc-700/50 flex items-center justify-center text-orange-400 shrink-0">
+                    <Wrench className="w-5 h-5 stroke-[2]" />
+                  </div>
+                  <div>
+                    <p className="text-xs sm:text-sm font-bold text-zinc-100">{item.title}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-[11px] text-zinc-400 font-medium">{item.vehicle}</span>
+                      <span className="text-zinc-600">•</span>
+                      <span className="text-[11px] font-mono text-zinc-500">{item.date}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="flex items-center gap-3">
-                <span className={`hidden sm:inline-block text-[10px] font-semibold px-2.5 py-1 rounded-full border ${item.badgeColor}`}>
-                  {item.type}
-                </span>
-                <span className="text-xs sm:text-sm font-mono font-bold text-zinc-100 bg-zinc-800 px-3 py-1.5 rounded-xl border border-zinc-700/60">
-                  {item.cost}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className={`hidden sm:inline-block text-[10px] font-semibold px-2.5 py-1 rounded-full border ${item.badgeColor}`}>
+                    {item.type}
+                  </span>
+                  <span className="text-xs sm:text-sm font-mono font-bold text-zinc-100 bg-zinc-800 px-3 py-1.5 rounded-xl border border-zinc-700/60">
+                    {item.cost}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* BENTO SECTION: NOTIFICACIONES AUTOMÁTICAS Y ANÁLISIS FINANCIERO */}
@@ -200,6 +243,20 @@ export function DashboardView({
             <h3 className="text-sm font-bold text-white tracking-tight">{t('notificationsTitle')}</h3>
           </div>
           {(() => {
+            if (vehicles.length === 0) {
+              return (
+                <div className="p-3.5 bg-zinc-800/50 border border-zinc-700/50 rounded-2xl flex items-center justify-between gap-3 text-xs text-zinc-300">
+                  <div className="flex items-center gap-2.5">
+                    <Sparkles className="w-4 h-4 text-orange-400 shrink-0" />
+                    <span>{t('noVehiclesDashboardNotice')}</span>
+                  </div>
+                  <button onClick={openAddVehicleModal} className="shrink-0 px-2.5 py-1 bg-orange-500/20 hover:bg-orange-500 text-orange-400 hover:text-white rounded-lg text-[10px] font-bold transition-all">
+                    {t('addVehicleBtn')}
+                  </button>
+                </div>
+              );
+            }
+
             const warnings = vehicles.filter(v => v.status !== 'ok');
             const lowStockParts = parts.filter(p => {
               const total = (p.purchases || []).reduce((sum, b) => sum + (b.qty || 0), 0);

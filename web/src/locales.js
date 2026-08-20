@@ -84,7 +84,11 @@ export const TRANSLATIONS = {
     onboardingBack: 'Atrás',
     onboardingSkip: 'Saltar',
     onboardingFinish: 'Empezar',
-    onboardingHelpAria: 'Ver ayuda'
+    onboardingHelpAria: 'Ver ayuda',
+    emptyGarageTitle: 'Tu garaje está vacío',
+    emptyGarageDesc: 'Añade tu moto, coche u otro vehículo para activar el seguimiento de mantenimientos, control de repuestos y alertas por km u horas.',
+    addFirstVehicleBtn: '+ Añadir mi primer vehículo',
+    noVehiclesDashboardNotice: 'Registra un vehículo para empezar a recibir alertas automáticas de servicio.'
   },
   en: {
     dashboard: 'Dashboard',
@@ -170,7 +174,11 @@ export const TRANSLATIONS = {
     onboardingBack: 'Back',
     onboardingSkip: 'Skip',
     onboardingFinish: 'Get started',
-    onboardingHelpAria: 'View help'
+    onboardingHelpAria: 'View help',
+    emptyGarageTitle: 'Your garage is empty',
+    emptyGarageDesc: 'Add your motorcycle, car, or other vehicle to enable maintenance tracking, parts management, and service alerts.',
+    addFirstVehicleBtn: '+ Add my first vehicle',
+    noVehiclesDashboardNotice: 'Register a vehicle to start receiving automatic service alerts.'
   },
   it: {
     dashboard: 'Dashboard',
@@ -256,7 +264,11 @@ export const TRANSLATIONS = {
     onboardingBack: 'Indietro',
     onboardingSkip: 'Salta',
     onboardingFinish: 'Inizia',
-    onboardingHelpAria: 'Vedi aiuto'
+    onboardingHelpAria: 'Vedi aiuto',
+    emptyGarageTitle: 'Il tuo garage è vuoto',
+    emptyGarageDesc: 'Aggiungi la tua moto, auto o altro veicolo per attivare il monitoraggio delle manutenzioni, gestione ricambi e avvisi per km o ore.',
+    addFirstVehicleBtn: '+ Aggiungi il mio primo veicolo',
+    noVehiclesDashboardNotice: 'Registra un veicolo per iniziare a ricevere avvisi automatici di servizio.'
   },
   fr: {
     dashboard: 'Tableau de bord',
@@ -342,7 +354,11 @@ export const TRANSLATIONS = {
     onboardingBack: 'Retour',
     onboardingSkip: 'Passer',
     onboardingFinish: 'Commencer',
-    onboardingHelpAria: "Voir l'aide"
+    onboardingHelpAria: "Voir l'aide",
+    emptyGarageTitle: 'Votre garage est vide',
+    emptyGarageDesc: 'Ajoutez votre moto, voiture ou autre véhicule pour activer le suivi des entretiens, gestion des pièces et alertes par km ou heures.',
+    addFirstVehicleBtn: '+ Ajouter mon premier véhicule',
+    noVehiclesDashboardNotice: "Enregistrez un véhicule pour commencer à recevoir des alertes d'entretien automatiques."
   },
   de: {
     dashboard: 'Übersicht',
@@ -428,7 +444,11 @@ export const TRANSLATIONS = {
     onboardingBack: 'Zurück',
     onboardingSkip: 'Überspringen',
     onboardingFinish: 'Loslegen',
-    onboardingHelpAria: 'Hilfe ansehen'
+    onboardingHelpAria: 'Hilfe ansehen',
+    emptyGarageTitle: 'Deine Garage ist leer',
+    emptyGarageDesc: 'Füge dein Motorrad, Auto oder anderes Fahrzeug hinzu, um Wartungsverfolgung, Teileverwaltung und Warnungen zu aktivieren.',
+    addFirstVehicleBtn: '+ Mein erstes Fahrzeug hinzufügen',
+    noVehiclesDashboardNotice: 'Registriere ein Fahrzeug, um automatische Service-Benachrichtigungen zu erhalten.'
   },
   pt: {
     dashboard: 'Painel',
@@ -514,7 +534,11 @@ export const TRANSLATIONS = {
     onboardingBack: 'Voltar',
     onboardingSkip: 'Saltar',
     onboardingFinish: 'Começar',
-    onboardingHelpAria: 'Ver ajuda'
+    onboardingHelpAria: 'Ver ajuda',
+    emptyGarageTitle: 'A sua garagem está vazia',
+    emptyGarageDesc: 'Adicione a sua moto, carro ou outro veículo para ativar o acompanhamento de manutenções, gestão de peças e alertas por km ou horas.',
+    addFirstVehicleBtn: '+ Adicionar o meu primeiro veículo',
+    noVehiclesDashboardNotice: 'Registe um veículo para começar a receber alertas automáticos de serviço.'
   }
 };
 

@@ -193,12 +193,15 @@ export function App() {
     if (showOnboarding) trackEvent('onboarding_step_viewed', { step: onboardingStep });
   }, [showOnboarding, onboardingStep]);
 
-  const closeOnboarding = () => {
+  const closeOnboarding = (isFinished = false) => {
     trackEvent(onboardingStep >= ONBOARDING_LAST_STEP ? 'onboarding_completed' : 'onboarding_skipped', { step: onboardingStep });
     setShowOnboarding(false);
     if (firebaseUser) {
       updateDoc(doc(db, 'users', firebaseUser.uid), { hasSeenOnboarding: true, updatedAt: serverTimestamp() })
         .catch(err => console.warn('Error al guardar que se vio el tour de bienvenida:', err));
+    }
+    if (isFinished && vehicles.length === 0) {
+      openAddVehicleModal();
     }
   };
 
@@ -987,6 +990,22 @@ export function App() {
     licensePlate: '',
     insuranceCompany: ''
   });
+
+  const openAddVehicleModal = () => {
+    setEditingVehicleId(null);
+    setNewVehicleForm({
+      name: '',
+      category: 'Mantenimiento por Km',
+      unit: 'km',
+      icon: '🏍️',
+      photo: '',
+      usageNum: '',
+      nextInspectionDate: '',
+      licensePlate: '',
+      insuranceCompany: ''
+    });
+    setShowAddVehicleModal(true);
+  };
 
   const openEditVehicleModal = (v) => {
     setEditingVehicleId(v.id);
@@ -2178,6 +2197,7 @@ export function App() {
             setEditingMaintenanceId={setEditingMaintenanceId} blankMaintenanceForm={blankMaintenanceForm} setNewMaintenanceForm={setNewMaintenanceForm} setShowAddMaintenanceModal={setShowAddMaintenanceModal}
             setActiveTab={setActiveTab} setSelectedVehicle={setSelectedVehicle}
             setShowKmModal={setShowKmModal} setNewKmValue={setNewKmValue} setNewSecondaryKmValue={setNewSecondaryKmValue}
+            openAddVehicleModal={openAddVehicleModal}
           />
         )}
 
