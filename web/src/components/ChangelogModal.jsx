@@ -1,4 +1,6 @@
 import { Sparkles, X, Check } from 'lucide-react';
+import { animate, stagger } from 'animejs';
+import { useAnimeScope } from '../utils/useAnime';
 
 const CLOSE_LABEL = {
   es: 'Entendido', en: 'Got it', it: 'Capito', fr: 'Compris', de: 'Verstanden', pt: 'Entendi',
@@ -13,8 +15,18 @@ const TITLE_LABEL = {
 export function ChangelogModal({ entries, language, onClose }) {
   const lang = CLOSE_LABEL[language] ? language : 'es';
 
+  const scopeRef = useAnimeScope(() => {
+    animate('.changelog-entry', {
+      opacity: [0, 1],
+      translateY: [12, 0],
+      delay: stagger(80, { start: 120 }),
+      duration: 400,
+      ease: 'outQuad',
+    });
+  }, []);
+
   return (
-    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[60] flex items-center justify-center p-4">
+    <div ref={scopeRef} className="fixed inset-0 bg-black/85 backdrop-blur-md z-[60] flex items-center justify-center p-4">
       <div className="w-full max-w-sm bg-zinc-900 rounded-3xl border border-zinc-800 p-6 shadow-2xl animate-in zoom-in-95 duration-150 relative max-h-[85vh] overflow-y-auto">
         <button
           type="button"
@@ -32,7 +44,7 @@ export function ChangelogModal({ entries, language, onClose }) {
 
         <div className="space-y-5 mb-6">
           {entries.map((entry) => (
-            <div key={entry.version}>
+            <div key={entry.version} className="changelog-entry">
               <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider mb-2">{entry.date}</p>
               <ul className="space-y-2">
                 {(entry.changes[lang] || entry.changes.es).map((line, i) => (

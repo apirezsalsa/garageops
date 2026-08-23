@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "animejs": "^4.5.0",
     "firebase": "^12.16.0",
     "lucide-react": "^1.26.0",
     "posthog-js": "^1.417.4",
