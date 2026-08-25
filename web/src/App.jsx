@@ -148,9 +148,18 @@ export function App() {
               updatedAt: serverTimestamp()
             });
           } else {
+            const existingData = existingSnap.data();
             await setDoc(userDocRef, {
               email: user.email,
-              role: isApiRez ? 'admin' : (existingSnap.data().role || 'user'),
+              role: isApiRez ? 'admin' : (existingData.role || 'user'),
+              // Si un intento anterior dejó el documento a medias (p.ej. sin plan por un fallo de
+              // permisos ya corregido), lo rellenamos aquí en vez de dejarlo huérfano para siempre.
+              ...(existingData.plan ? {} : {
+                plan: isApiRez ? 'unlimited' : defaultPlanIdRef.current,
+                billingCycle: existingData.billingCycle || 'monthly',
+                planStartDate: serverTimestamp(),
+                pendingPlanChange: existingData.pendingPlanChange ?? null
+              }),
               updatedAt: serverTimestamp()
             }, { merge: true });
           }
