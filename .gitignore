@@ -50,3 +50,6 @@ garageops_structure.json
 
 # landing tiene su propio repo git (mygarageops-landing/.git)
 mygarageops-landing/
+
+# material de trabajo de vídeo (clips intermedios, no el resultado final)
+Videos/
