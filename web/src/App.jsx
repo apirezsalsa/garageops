@@ -114,7 +114,22 @@ export function App() {
   const [changelogEntries, setChangelogEntries] = useState(null);
   const [loginForm, setLoginForm] = useState({ email: '', password: '', rememberMe: true });
   const [loginError, setLoginError] = useState('');
-  const [isRegisterMode, setIsRegisterMode] = useState(false);
+  // La landing enlaza aquí con ?signup=1 (y opcionalmente &plan=<id>) para llevar directo al registro;
+  // sin esto la app siempre arrancaba en modo login e ignoraba el enlace.
+  const [isRegisterMode, setIsRegisterMode] = useState(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('signup') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const requestedPlanIdRef = useRef((() => {
+    try {
+      return new URLSearchParams(window.location.search).get('plan');
+    } catch {
+      return null;
+    }
+  })());
 
   // Referencia mutable al plan por defecto vigente (se sincroniza más abajo, una vez cargados los planes),
   // para poder leer siempre su valor más reciente dentro del callback de auth sin resuscribir el listener.
@@ -258,11 +273,17 @@ export function App() {
   const [plans, setPlans] = useState([]);
   const plansById = useMemo(() => Object.fromEntries(plans.map(p => [p.id, p])), [plans]);
   const defaultPlanId = useMemo(() => plans.find(p => p.isDefaultSignup && p.active !== false)?.id || 'starter', [plans]);
-  useEffect(() => { defaultPlanIdRef.current = defaultPlanId; }, [defaultPlanId]);
-
-  // Listener global de planes + siembra inicial (una sola vez, hecha por el SuperAdmin si la colección está vacía)
   useEffect(() => {
-    if (!firebaseUser) return;
+    const requested = requestedPlanIdRef.current;
+    const requestedIsValid = requested && plans.some(p => p.id === requested && p.active !== false);
+    defaultPlanIdRef.current = requestedIsValid ? requested : defaultPlanId;
+  }, [defaultPlanId, plans]);
+
+  // Listener global de planes + siembra inicial (una sola vez, hecha por el SuperAdmin si la colección está vacía).
+  // Sin gate de auth a propósito: las reglas de Firestore permiten lectura pública (allow read: if true) y
+  // necesitamos que ya estén cargados antes de que el usuario complete el registro, para poder honrar el
+  // ?plan= que llega de la landing (si esperásemos a firebaseUser, el setDoc del alta ya habría corrido con el plan por defecto).
+  useEffect(() => {
     const plansQuery = query(collection(db, 'plans'), orderBy('order'));
     const unsubPlans = onSnapshot(plansQuery, async (snap) => {
       if (snap.empty) {
@@ -538,69 +559,74 @@ export function App() {
       localStorage.setItem(localPartsKey, JSON.stringify(list));
     }, (err) => console.warn('Firestore parts listener fallback:', err));
 
-    // Listener de colección de usuarios reales de Firestore para el Backoffice
-    const allUsersCol = collection(db, 'users');
-    const allVehiclesCol = collection(db, 'vehicles');
+    // Listener de colección de usuarios reales de Firestore para el Backoffice (solo admin: la regla de Firestore deniega el `list` a usuarios normales)
+    let unsub4 = () => {};
+    let unsub5 = () => {};
 
-    // Conteo real de vehículos por userId
-    const unsub5 = onSnapshot(allVehiclesCol, (vehSnap) => {
-      const countsByUser = {};
-      vehSnap.docs.forEach(d => {
-        const uid = d.data().userId;
-        if (uid) countsByUser[uid] = (countsByUser[uid] || 0) + 1;
-      });
-      setVehicleCountsByUser(countsByUser);
-    }, (err) => console.warn('Firestore vehicles count listener fallback:', err));
+    if (isSuperAdmin) {
+      const allUsersCol = collection(db, 'users');
+      const allVehiclesCol = collection(db, 'vehicles');
 
-    const unsub4 = onSnapshot(allUsersCol, (snap) => {
-      if (!snap.empty) {
-        const realUsers = snap.docs.map(d => {
-          const data = d.data();
-
-          // Extraer fecha de registro
-          let regDate = null;
-          if (data.createdAt) {
-            if (typeof data.createdAt.seconds === 'number') {
-              regDate = new Date(data.createdAt.seconds * 1000);
-            } else if (typeof data.createdAt === 'string') {
-              regDate = new Date(data.createdAt);
-            }
-          } else if (data.updatedAt && typeof data.updatedAt.seconds === 'number') {
-            regDate = new Date(data.updatedAt.seconds * 1000);
-          }
-
-          // Extraer última conexión
-          let lastLogin = null;
-          if (data.updatedAt) {
-            if (typeof data.updatedAt.seconds === 'number') {
-              lastLogin = new Date(data.updatedAt.seconds * 1000);
-            } else if (typeof data.updatedAt === 'string') {
-              lastLogin = new Date(data.updatedAt);
-            }
-          }
-
-          return {
-            id: d.id,
-            email: data.email || `user_${d.id.slice(0, 5)}@garageops.io`,
-            role: data.role || 'user',
-            plan: data.plan || defaultPlanId,
-            billingCycle: data.billingCycle || 'monthly',
-            pendingPlanChange: data.pendingPlanChange || null,
-            giftDays: data.giftDays || 0,
-            giftPlanExpiry: data.giftPlanExpiry || null,
-            status: data.status || 'active',
-            registered: regDate,
-            lastLogin: lastLogin
-          };
+      // Conteo real de vehículos por userId
+      unsub5 = onSnapshot(allVehiclesCol, (vehSnap) => {
+        const countsByUser = {};
+        vehSnap.docs.forEach(d => {
+          const uid = d.data().userId;
+          if (uid) countsByUser[uid] = (countsByUser[uid] || 0) + 1;
         });
-        setAllUsersList(realUsers);
-      } else {
-        setAllUsersList([]);
-      }
-    }, (err) => console.warn('Firestore users collection listener fallback:', err));
+        setVehicleCountsByUser(countsByUser);
+      }, (err) => console.warn('Firestore vehicles count listener fallback:', err));
+
+      unsub4 = onSnapshot(allUsersCol, (snap) => {
+        if (!snap.empty) {
+          const realUsers = snap.docs.map(d => {
+            const data = d.data();
+
+            // Extraer fecha de registro
+            let regDate = null;
+            if (data.createdAt) {
+              if (typeof data.createdAt.seconds === 'number') {
+                regDate = new Date(data.createdAt.seconds * 1000);
+              } else if (typeof data.createdAt === 'string') {
+                regDate = new Date(data.createdAt);
+              }
+            } else if (data.updatedAt && typeof data.updatedAt.seconds === 'number') {
+              regDate = new Date(data.updatedAt.seconds * 1000);
+            }
+
+            // Extraer última conexión
+            let lastLogin = null;
+            if (data.updatedAt) {
+              if (typeof data.updatedAt.seconds === 'number') {
+                lastLogin = new Date(data.updatedAt.seconds * 1000);
+              } else if (typeof data.updatedAt === 'string') {
+                lastLogin = new Date(data.updatedAt);
+              }
+            }
+
+            return {
+              id: d.id,
+              email: data.email || `user_${d.id.slice(0, 5)}@garageops.io`,
+              role: data.role || 'user',
+              plan: data.plan || defaultPlanId,
+              billingCycle: data.billingCycle || 'monthly',
+              pendingPlanChange: data.pendingPlanChange || null,
+              giftDays: data.giftDays || 0,
+              giftPlanExpiry: data.giftPlanExpiry || null,
+              status: data.status || 'active',
+              registered: regDate,
+              lastLogin: lastLogin
+            };
+          });
+          setAllUsersList(realUsers);
+        } else {
+          setAllUsersList([]);
+        }
+      }, (err) => console.warn('Firestore users collection listener fallback:', err));
+    }
 
     return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
-  }, [firebaseUser, inspectingUser]);
+  }, [firebaseUser, inspectingUser, isSuperAdmin]);
 
   // Histórico de transacciones de Stripe (altas, modificaciones y bajas), solo para el Backoffice
   useEffect(() => {
