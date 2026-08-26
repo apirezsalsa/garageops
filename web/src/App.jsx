@@ -130,6 +130,9 @@ export function App() {
       return null;
     }
   })());
+  // Plan de pago a contratar en cuanto haya sesión (lo fija handleLoginSubmit tras un alta nueva con
+  // ?plan= de pago; lo consume el efecto junto a handleStripeCheckout, ver más abajo).
+  const pendingCheckoutPlanRef = useRef(null);
 
   // Referencia mutable al plan por defecto vigente (se sincroniza más abajo, una vez cargados los planes),
   // para poder leer siempre su valor más reciente dentro del callback de auth sin resuscribir el listener.
@@ -273,16 +276,19 @@ export function App() {
   const [plans, setPlans] = useState([]);
   const plansById = useMemo(() => Object.fromEntries(plans.map(p => [p.id, p])), [plans]);
   const defaultPlanId = useMemo(() => plans.find(p => p.isDefaultSignup && p.active !== false)?.id || 'starter', [plans]);
+  // El documento inicial del usuario SIEMPRE se crea con el plan gratuito por defecto: las reglas de
+  // Firestore (users/{uid}, allow create) rechazan con permission-denied cualquier intento de crearlo
+  // ya con un plan de pago — eso solo puede fijarlo el servidor (Stripe webhook). El plan pedido por
+  // la landing (?plan=) se contrata aparte, vía Stripe Checkout, una vez el usuario ya existe (ver
+  // requestedPlanIdRef y el efecto que dispara handleStripeCheckout más abajo).
   useEffect(() => {
-    const requested = requestedPlanIdRef.current;
-    const requestedIsValid = requested && plans.some(p => p.id === requested && p.active !== false);
-    defaultPlanIdRef.current = requestedIsValid ? requested : defaultPlanId;
-  }, [defaultPlanId, plans]);
+    defaultPlanIdRef.current = defaultPlanId;
+  }, [defaultPlanId]);
 
   // Listener global de planes + siembra inicial (una sola vez, hecha por el SuperAdmin si la colección está vacía).
   // Sin gate de auth a propósito: las reglas de Firestore permiten lectura pública (allow read: if true) y
-  // necesitamos que ya estén cargados antes de que el usuario complete el registro, para poder honrar el
-  // ?plan= que llega de la landing (si esperásemos a firebaseUser, el setDoc del alta ya habría corrido con el plan por defecto).
+  // necesitamos que ya estén cargados antes de que el usuario complete el registro, para poder validar
+  // el ?plan= que llega de la landing contra planes reales y activos.
   useEffect(() => {
     const plansQuery = query(collection(db, 'plans'), orderBy('order'));
     const unsubPlans = onSnapshot(plansQuery, async (snap) => {
@@ -418,7 +424,7 @@ export function App() {
     try {
       if (isRegisterMode) {
         const cred = await createUserWithEmailAndPassword(auth, loginForm.email, loginForm.password);
-        // Crear perfil en Firestore
+        // Crear perfil en Firestore siempre con el plan gratuito por defecto (ver defaultPlanIdRef)
         await setDoc(doc(db, 'users', cred.user.uid), {
           email: loginForm.email,
           plan: defaultPlanIdRef.current,
@@ -427,6 +433,16 @@ export function App() {
           pendingPlanChange: null,
           createdAt: serverTimestamp()
         });
+        // Si venía de la landing pidiendo un plan de pago concreto (?plan=), lo contratamos ahora vía
+        // Stripe Checkout: el efecto que vigila pendingCheckoutPlanRef lo lanza en cuanto firebaseUser
+        // quede disponible (justo después de este alta, todavía no lo está en este mismo tick).
+        const requestedPlan = requestedPlanIdRef.current;
+        const requestedPlanIsPaid = requestedPlan && plansById[requestedPlan]?.active !== false
+          && (Number(plansById[requestedPlan]?.priceMonthly) > 0 || Number(plansById[requestedPlan]?.priceAnnual) > 0);
+        if (requestedPlanIsPaid) {
+          pendingCheckoutPlanRef.current = requestedPlan;
+        }
+        requestedPlanIdRef.current = null;
       } else {
         await signInWithEmailAndPassword(auth, loginForm.email, loginForm.password);
       }
@@ -729,8 +745,15 @@ export function App() {
     }
   };
 
-  // Estado de Idioma (es, en, it) con persistencia local
+  // Estado de Idioma (es, en, it) con persistencia local. La landing enlaza con ?lang=<code>
+  // para que el idioma elegido ahí no se pierda al saltar a la app.
   const [language, setLanguage] = useState(() => {
+    try {
+      const urlLang = new URLSearchParams(window.location.search).get('lang');
+      if (urlLang && PLAN_LANGUAGES.includes(urlLang)) return urlLang;
+    } catch {
+      // ignore
+    }
     return localStorage.getItem('garageops_language') || 'es';
   });
 
@@ -847,6 +870,16 @@ export function App() {
       setCheckoutLoading(false);
     }
   };
+
+  // Dispara el checkout del plan de pago pedido desde la landing en cuanto hay sesión: justo después
+  // de crear la cuenta en handleLoginSubmit, firebaseUser todavía no se ha actualizado (onAuthStateChanged
+  // es async), así que no se puede llamar a handleStripeCheckout ahí mismo sin arriesgarse a que no haga nada.
+  useEffect(() => {
+    if (!firebaseUser || !pendingCheckoutPlanRef.current) return;
+    const targetPlanId = pendingCheckoutPlanRef.current;
+    pendingCheckoutPlanRef.current = null;
+    handleStripeCheckout(targetPlanId, 'monthly');
+  }, [firebaseUser]);
 
   // Abre el Portal de Facturación de Stripe para que el usuario gestione o cancele su suscripción activa
   const handleOpenBillingPortal = async () => {

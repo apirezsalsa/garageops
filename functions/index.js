@@ -4,6 +4,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { getMessaging } from 'firebase-admin/messaging';
 import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
+import { onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { defineSecret } from 'firebase-functions/params';
 import { logger } from 'firebase-functions';
 import Stripe from 'stripe';
@@ -451,4 +452,76 @@ export const sendTestPushNotification = onCall({ enforceAppCheck: true }, async 
   });
 
   return { success: true };
+});
+
+// Sincroniza hacia Stripe los cambios de nombre y precio hechos en un plan desde el Backoffice.
+// El nombre se actualiza en el Product directamente. El precio en Stripe es inmutable una vez
+// creado: "cambiarlo" significa crear un Price nuevo, archivar el anterior (para que solo afecte
+// a altas nuevas, no a quien ya estaba suscrito al precio viejo) y guardar el Price ID nuevo de
+// vuelta en el propio documento del plan, para que el checkout lo recoja automáticamente.
+//
+// Solo actúa si el plan ya tiene `stripeProductId` (se enlaza a mano una vez por plan, ver
+// Firestore): así nunca crea Products nuevos en Stripe por su cuenta, solo mantiene sincronizados
+// los que alguien ya decidió conectar.
+//
+// Nota: si en el futuro hay suscriptores activos y se cambia el precio de su plan, los webhooks de
+// Stripe para su suscripción seguirán llegando con el Price ID antiguo (ya archivado), que dejará
+// de coincidir con el Price ID guardado en el plan. Hoy no hay suscriptores de pago reales, así que
+// no hace falta un mapeo histórico de precios; revisar `findPlanByStripePriceId` si eso cambia.
+export const syncPlanToStripe = onDocumentUpdated({ document: 'plans/{planId}', secrets: [STRIPE_SECRET_KEY] }, async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  if (!after?.stripeProductId) return;
+
+  const nameChanged = before.name !== after.name;
+  const monthlyChanged = Number(before.priceMonthly) !== Number(after.priceMonthly);
+  const annualChanged = Number(before.priceAnnual) !== Number(after.priceAnnual);
+  if (!nameChanged && !monthlyChanged && !annualChanged) return;
+
+  const stripe = getStripe(STRIPE_SECRET_KEY.value());
+  const planId = event.params.planId;
+
+  try {
+    if (nameChanged) {
+      await stripe.products.update(after.stripeProductId, { name: after.name });
+      logger.info(`Plan ${planId}: nombre sincronizado a Stripe ("${after.name}")`);
+    }
+
+    const updates = {};
+
+    // priceAnnual se guarda como equivalente mensual (lo que se muestra al usuario); el Price de
+    // Stripe con intervalo anual cobra el importe del año completo, de ahí el ×12.
+    const priceChanges = [
+      { changed: monthlyChanged, amount: after.priceMonthly, interval: 'month', field: 'stripePriceIdMonthly', multiplier: 1, label: 'mensual' },
+      { changed: annualChanged, amount: after.priceAnnual, interval: 'year', field: 'stripePriceIdAnnual', multiplier: 12, label: 'anual' }
+    ];
+
+    for (const { changed, amount, interval, field, multiplier, label } of priceChanges) {
+      if (!changed || !(Number(amount) > 0)) continue;
+
+      const newPrice = await stripe.prices.create({
+        product: after.stripeProductId,
+        currency: 'eur',
+        unit_amount: Math.round(Number(amount) * multiplier * 100),
+        recurring: { interval },
+        tax_behavior: 'inclusive'
+      });
+
+      const oldPriceId = after[field];
+      if (oldPriceId) {
+        await stripe.prices.update(oldPriceId, { active: false }).catch((err) =>
+          logger.warn(`Plan ${planId}: no se pudo archivar el precio ${label} antiguo (${oldPriceId})`, err)
+        );
+      }
+
+      updates[field] = newPrice.id;
+      logger.info(`Plan ${planId}: nuevo precio ${label} en Stripe (${newPrice.id})`);
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await event.data.after.ref.update(updates);
+    }
+  } catch (err) {
+    logger.error(`Error sincronizando el plan ${planId} con Stripe`, err);
+  }
 });
