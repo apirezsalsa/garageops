@@ -22,8 +22,46 @@ const RESEND_API_KEY = defineSecret('RESEND_API_KEY');
 
 // Remitente de los correos enviados desde el Backoffice. El dominio tiene que estar verificado en
 // Resend (Dashboard → Domains → añadir mygarageops.com y crear los registros DNS que pida en IONOS)
-// o Resend rechaza el envío.
-const EMAIL_FROM = 'MyGarageOps <hola@mygarageops.com>';
+// o Resend rechaza el envío. La dirección en sí (soporte@) no necesita nada más una vez el dominio
+// está verificado — la verificación es a nivel de dominio, no de buzón.
+const EMAIL_FROM = 'MyGarageOps <soporte@mygarageops.com>';
+const EMAIL_LOGO_URL = 'https://mygarageops.com/logo.png';
+
+// Envuelve el mensaje que escribe el admin en una plantilla con cabecera (logo + marca) y firma, para
+// que los correos del Backoffice se vean como comunicación real de la app y no como texto suelto.
+// Estilos en línea a propósito: la mayoría de clientes de correo ignora o recorta <style>.
+function wrapEmailTemplate(bodyHtml) {
+  return `<!doctype html>
+<html>
+  <body style="margin:0; padding:32px 16px; background-color:#f4f4f5; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px; width:100%; background-color:#ffffff; border-radius:16px; overflow:hidden; border:1px solid #e4e4e7;">
+            <tr>
+              <td style="background-color:#0c0a09; padding:24px 32px; text-align:center;">
+                <img src="${EMAIL_LOGO_URL}" width="40" height="40" alt="MyGarageOps" style="display:block; margin:0 auto 10px; border-radius:10px;" />
+                <span style="color:#ffffff; font-size:16px; font-weight:700; letter-spacing:-0.01em;">MyGarageOps</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:32px; color:#18181b; font-size:14px; line-height:1.6;">
+                ${bodyHtml}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:20px 32px; background-color:#fafafa; border-top:1px solid #e4e4e7; color:#71717a; font-size:12px; line-height:1.5;">
+                <p style="margin:0 0 4px;">— El equipo de MyGarageOps</p>
+                <p style="margin:0;">¿Dudas? Escríbenos a <a href="mailto:soporte@mygarageops.com" style="color:#f97316; text-decoration:none;">soporte@mygarageops.com</a></p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
 
 // URL base de la app privada, usada para las redirecciones de vuelta desde Stripe Checkout / Portal
 const APP_URL = 'https://app.mygarageops.com';
@@ -587,10 +625,11 @@ export const sendUserEmail = onCall({ enforceAppCheck: true, secrets: [RESEND_AP
     return { sent: 0, message: 'No hay ningún destinatario para esos criterios.' };
   }
 
+  const brandedHtml = wrapEmailTemplate(html);
   const apiKey = RESEND_API_KEY.value();
   const errors = [];
   for (let i = 0; i < recipients.length; i += 100) {
-    const batch = recipients.slice(i, i + 100).map(to => ({ from: EMAIL_FROM, to, subject, html }));
+    const batch = recipients.slice(i, i + 100).map(to => ({ from: EMAIL_FROM, to, subject, html: brandedHtml }));
     try {
       await sendResendBatch(apiKey, batch);
     } catch (err) {
