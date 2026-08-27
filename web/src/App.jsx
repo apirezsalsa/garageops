@@ -10,7 +10,9 @@ import {
   signInWithPopup,
   GoogleAuthProvider,
   OAuthProvider,
-  signOut
+  signOut,
+  sendEmailVerification,
+  sendPasswordResetEmail
 } from 'firebase/auth';
 import { 
   collection, 
@@ -62,7 +64,8 @@ import {
   Bell,
   X,
   ArrowLeft,
-  ArrowRight
+  ArrowRight,
+  Mail
 } from 'lucide-react';
 import { TRANSLATIONS, translateCategory } from './locales';
 import { computePlanStats } from './utils/billing';
@@ -165,6 +168,14 @@ export function App() {
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp()
             });
+
+            // Si venía de la landing pidiendo un plan de pago (p.ej. alta vía Google/Apple con ?plan=),
+            // programamos el checkout para que se lance en cuanto carguen los planes
+            const requestedPlan = requestedPlanIdRef.current;
+            if (requestedPlan && requestedPlan !== 'starter') {
+              pendingCheckoutPlanRef.current = requestedPlan;
+            }
+            requestedPlanIdRef.current = null;
           } else {
             const existingData = existingSnap.data();
             await setDoc(userDocRef, {
@@ -424,6 +435,13 @@ export function App() {
     try {
       if (isRegisterMode) {
         const cred = await createUserWithEmailAndPassword(auth, loginForm.email, loginForm.password);
+        // Enviar correo de verificación inicial de Firebase Auth
+        try {
+          await sendEmailVerification(cred.user);
+        } catch (verifErr) {
+          console.warn('No se pudo enviar correo de verificación inicial:', verifErr);
+        }
+
         // Crear perfil en Firestore siempre con el plan gratuito por defecto (ver defaultPlanIdRef)
         await setDoc(doc(db, 'users', cred.user.uid), {
           email: loginForm.email,
@@ -456,6 +474,68 @@ export function App() {
         'auth/wrong-password': 'Contraseña incorrecta'
       };
       setLoginError(errorMap[err.code] || err.message);
+    }
+  };
+
+  const [resetEmailLoading, setResetEmailLoading] = useState(false);
+  const handleForgotPassword = async () => {
+    setLoginError('');
+    const targetEmail = (loginForm.email || '').trim();
+    if (!targetEmail) {
+      setLoginError(
+        language === 'es' ? 'Introduce tu correo electrónico arriba para enviarte el enlace de recuperación.' :
+        language === 'en' ? 'Please enter your email address above to receive the recovery link.' :
+        language === 'it' ? 'Inserisci il tuo indirizzo email sopra per ricevere il link di recupero.' :
+        language === 'fr' ? 'Entrez votre adresse e-mail ci-dessus pour recevoir le lien de récupération.' :
+        language === 'de' ? 'Gib oben deine E-Mail-Adresse ein, um den Wiederherstellungslink zu erhalten.' :
+        'Introduz o teu endereço de email acima para receber o link de recuperação.'
+      );
+      return;
+    }
+    setResetEmailLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, targetEmail);
+      setNoticeModal({
+        title: language === 'es' ? 'Correo de Recuperación Enviado' : language === 'en' ? 'Recovery Email Sent' : language === 'it' ? 'Email di Recupero Inviata' : language === 'fr' ? 'E-mail de Récupération Envoyé' : language === 'de' ? 'Wiederherstellungs-E-Mail Gesendet' : 'Email de Recuperação Enviado',
+        message: language === 'es' ? `Hemos enviado un enlace para restablecer tu contraseña a ${targetEmail}. Revisa tu bandeja de entrada o la carpeta de spam.` : language === 'en' ? `We sent a password reset link to ${targetEmail}. Please check your inbox or spam folder.` : language === 'it' ? `Abbiamo inviato un link per reimpostare la password a ${targetEmail}. Controlla la posta in arrivo o lo spam.` : language === 'fr' ? `Nous avons envoyé un lien pour réinitialiser votre mot de passe à ${targetEmail}. Vérifiez votre boîte de réception ou vos spams.` : language === 'de' ? `Wir haben einen Link zum Zurücksetzen deines Passworts an ${targetEmail} gesendet. Bitte überprüfe deinen Posteingang oder Spam-Ordner.` : `Enviámos um link para repor a tua palavra-passe para ${targetEmail}. Verifica a tua caixa de entrada ou spam.`,
+        type: 'success'
+      });
+    } catch (err) {
+      const errorMap = {
+        'auth/user-not-found': language === 'es' ? 'No existe ninguna cuenta con ese correo' : 'No account found with this email',
+        'auth/invalid-email': language === 'es' ? 'Correo electrónico no válido' : 'Invalid email address',
+        'auth/too-many-requests': language === 'es' ? 'Demasiados intentos. Espera unos minutos.' : 'Too many attempts. Please wait a few minutes.'
+      };
+      setLoginError(errorMap[err.code] || err.message);
+    } finally {
+      setResetEmailLoading(false);
+    }
+  };
+
+  const [verificationInFlight, setVerificationInFlight] = useState(false);
+  const [verificationSuccess, setVerificationSuccess] = useState(false);
+  const handleResendVerification = async () => {
+    if (!firebaseUser || verificationInFlight) return;
+    setVerificationInFlight(true);
+    try {
+      await sendEmailVerification(firebaseUser);
+      setVerificationSuccess(true);
+      setNoticeModal({
+        title: language === 'es' ? 'Enlace de Verificación Enviado' : language === 'en' ? 'Verification Link Sent' : language === 'it' ? 'Link di Verifica Inviato' : language === 'fr' ? 'Lien de Vérification Envoyé' : language === 'de' ? 'Bestätigungslink Gesendet' : 'Link de Verificação Enviado',
+        message: language === 'es' ? `Hemos enviado un enlace a ${firebaseUser.email}. Revisa tu bandeja de entrada o la carpeta de spam.` : language === 'en' ? `We sent a verification link to ${firebaseUser.email}. Please check your inbox or spam folder.` : language === 'it' ? `Abbiamo inviato un link a ${firebaseUser.email}. Controlla la posta in arrivo o lo spam.` : language === 'fr' ? `Nous avons envoyé un lien à ${firebaseUser.email}. Vérifiez votre boîte de réception ou vos spams.` : language === 'de' ? `Wir haben einen Bestätigungslink an ${firebaseUser.email} gesendet. Bitte überprüfe deinen Posteingang oder Spam.` : `Enviámos um link para ${firebaseUser.email}. Verifica a tua caixa de entrada ou spam.`,
+        type: 'success'
+      });
+    } catch (err) {
+      console.warn('Error al reenviar verificación de email:', err);
+      setNoticeModal({
+        title: 'Error',
+        message: err.code === 'auth/too-many-requests'
+          ? (language === 'es' ? 'Demasiados intentos. Espera unos minutos antes de volver a solicitarlo.' : 'Too many requests. Please wait a few minutes.')
+          : (language === 'es' ? 'No se pudo enviar el correo de verificación.' : 'Could not send verification email.'),
+        type: 'warning'
+      });
+    } finally {
+      setVerificationInFlight(false);
     }
   };
 
@@ -2011,10 +2091,13 @@ export function App() {
 
                 <button 
                   type="button" 
-                  onClick={() => alert(language === 'es' ? 'Se ha enviado un enlace de recuperación a tu correo.' : language === 'en' ? 'Password reset link sent to your email.' : language === 'it' ? 'Ti abbiamo inviato un link di recupero via email.' : language === 'fr' ? 'Un lien de récupération a été envoyé à votre e-mail.' : language === 'de' ? 'Ein Link zum Zurücksetzen wurde an deine E-Mail gesendet.' : 'Foi enviado um link de recuperação para o teu email.')}
-                  className="text-xs text-orange-400 hover:underline font-medium"
+                  onClick={handleForgotPassword}
+                  disabled={resetEmailLoading}
+                  className="text-xs text-orange-400 hover:underline font-medium disabled:opacity-50"
                 >
-                  {language === 'es' ? '¿Olvidaste tu clave?' : language === 'en' ? 'Forgot password?' : language === 'it' ? 'Password dimenticata?' : language === 'fr' ? 'Mot de passe oublié ?' : language === 'de' ? 'Passwort vergessen?' : 'Esqueceste-te da palavra-passe?'}
+                  {resetEmailLoading 
+                    ? (language === 'es' ? 'Enviando enlace...' : 'Sending link...')
+                    : (language === 'es' ? '¿Olvidaste tu clave?' : language === 'en' ? 'Forgot password?' : language === 'it' ? 'Password dimenticata?' : language === 'fr' ? 'Mot de passe oublié ?' : language === 'de' ? 'Passwort vergessen?' : 'Esqueceste-te da palavra-passe?')}
                 </button>
               </div>
 
@@ -2258,6 +2341,34 @@ export function App() {
           </div>
         </header>
 
+        {firebaseUser && !firebaseUser.emailVerified && firebaseUser.providerData?.some(p => p.providerId === 'password') && (
+          <div className="bg-amber-500/10 border border-amber-500/30 text-amber-300 px-4 py-2.5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs mb-6 animate-in fade-in duration-200">
+            <div className="flex items-center gap-2">
+              <Mail className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>
+                {language === 'es' ? 'Verifica tu correo electrónico para asegurar tu cuenta y recibir notificaciones.' :
+                 language === 'en' ? 'Verify your email address to secure your account and receive notifications.' :
+                 language === 'it' ? 'Verifica il tuo indirizzo email per proteggere il tuo account e ricevere notifiche.' :
+                 language === 'fr' ? 'Vérifiez votre adresse e-mail pour sécuriser votre compte et recevoir des notifications.' :
+                 language === 'de' ? 'Bestätige deine E-Mail-Adresse, um dein Konto zu sichern und Benachrichtigungen zu erhalten.' :
+                 'Verifica o teu endereço de email para proteger a tua conta e receber notificações.'}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleResendVerification}
+              disabled={verificationInFlight || verificationSuccess}
+              className="self-start sm:self-auto px-3 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 rounded-xl text-[11px] font-bold transition-all disabled:opacity-50 shrink-0"
+            >
+              {verificationSuccess
+                ? (language === 'es' ? '✓ Enviado' : language === 'en' ? '✓ Sent' : language === 'it' ? '✓ Inviato' : language === 'fr' ? '✓ Envoyé' : language === 'de' ? '✓ Gesendet' : '✓ Enviado')
+                : verificationInFlight
+                ? (language === 'es' ? 'Enviando...' : 'Sending...')
+                : (language === 'es' ? 'Reenviar enlace' : language === 'en' ? 'Resend link' : language === 'it' ? 'Reinvia link' : language === 'fr' ? 'Renvoyer le lien' : language === 'de' ? 'Link erneut senden' : 'Reenviar link')}
+            </button>
+          </div>
+        )}
+
         {activeTab === 'dashboard' && !selectedVehicle && (
           <DashboardView
             language={language} t={t} currencySymbol={currencySymbol}
@@ -2320,6 +2431,7 @@ export function App() {
             language={language} setLanguage={setLanguage} t={t}
             currency={currency} setCurrency={setCurrency}
             userEmail={userEmail} handleLogout={handleLogout}
+            firebaseUser={firebaseUser} handleResendVerification={handleResendVerification} verificationInFlight={verificationInFlight} verificationSuccess={verificationSuccess}
             pushPermissionStatus={pushPermissionStatus} handleEnablePushNotifications={handleEnablePushNotifications} pushRequestInFlight={pushRequestInFlight}
             handleSendTestPush={handleSendTestPush} testPushInFlight={testPushInFlight}
             currentPlanDef={currentPlanDef} currentPlan={currentPlan}
@@ -2753,10 +2865,12 @@ export function App() {
             
             <form onSubmit={handleCreateVehicle} className="space-y-3.5 text-xs">
               <div>
-                <label className="block text-zinc-400 font-medium mb-1">Nombre / Modelo del Vehículo</label>
+                <label className="block text-zinc-400 font-medium mb-1">
+                  {language === 'es' ? 'Nombre / Modelo del Vehículo' : language === 'en' ? 'Vehicle Name / Model' : language === 'it' ? 'Nome / Modello del Veicolo' : language === 'fr' ? 'Nom / Modèle du Véhicule' : language === 'de' ? 'Fahrzeugname / Modell' : 'Nome / Modelo do Veículo'}
+                </label>
                 <input 
                   type="text" 
-                  placeholder="Ej: Honda CRF 250R, Audi A4 2.0 TDI" 
+                  placeholder={language === 'es' ? 'Ej: Honda CRF 250R, Audi A4 2.0 TDI' : language === 'en' ? 'e.g. Honda CRF 250R, Audi A4 2.0 TDI' : language === 'it' ? 'Es: Honda CRF 250R, Audi A4 2.0 TDI' : language === 'fr' ? 'Ex: Honda CRF 250R, Audi A4 2.0 TDI' : language === 'de' ? 'Z.B. Honda CRF 250R, Audi A4 2.0 TDI' : 'Ex: Honda CRF 250R, Audi A4 2.0 TDI'} 
                   value={newVehicleForm.name}
                   onChange={(e) => setNewVehicleForm({ ...newVehicleForm, name: e.target.value })}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-medium placeholder:text-zinc-600" 
@@ -2766,7 +2880,9 @@ export function App() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-zinc-400 font-medium mb-1">Tipo de Medición</label>
+                  <label className="block text-zinc-400 font-medium mb-1">
+                    {language === 'es' ? 'Tipo de Medición' : language === 'en' ? 'Measurement Type' : language === 'it' ? 'Tipo di Misurazione' : language === 'fr' ? 'Type de Mesure' : language === 'de' ? 'Messart' : 'Tipo de Medição'}
+                  </label>
                   <select 
                     value={newVehicleForm.unit}
                     onChange={(e) => setNewVehicleForm({ 
@@ -2776,12 +2892,14 @@ export function App() {
                     })}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-medium"
                   >
-                    <option value="km">Kilómetros (km)</option>
-                    <option value="hrs">Horas de uso (hrs)</option>
+                    <option value="km">{language === 'es' ? 'Kilómetros (km)' : language === 'en' ? 'Kilometers (km)' : language === 'it' ? 'Chilometri (km)' : language === 'fr' ? 'Kilomètres (km)' : language === 'de' ? 'Kilometer (km)' : 'Quilómetros (km)'}</option>
+                    <option value="hrs">{language === 'es' ? 'Horas de uso (hrs)' : language === 'en' ? 'Hours of use (hrs)' : language === 'it' ? 'Ore di utilizzo (hrs)' : language === 'fr' ? "Heures d'utilisation (hrs)" : language === 'de' ? 'Betriebsstunden (hrs)' : 'Horas de utilização (hrs)'}</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-zinc-400 font-medium mb-1">Lectura Inicial</label>
+                  <label className="block text-zinc-400 font-medium mb-1">
+                    {language === 'es' ? 'Lectura Inicial' : language === 'en' ? 'Initial Reading' : language === 'it' ? 'Lettura Iniziale' : language === 'fr' ? 'Relevé Initial' : language === 'de' ? 'Anfangsstand' : 'Leitura Inicial'}
+                  </label>
                   <input 
                     type="number" 
                     placeholder="0" 
@@ -2793,7 +2911,9 @@ export function App() {
               </div>
 
               <div>
-                <label className="block text-zinc-400 font-medium mb-1">Foto del Vehículo (Opcional)</label>
+                <label className="block text-zinc-400 font-medium mb-1">
+                  {language === 'es' ? 'Foto del Vehículo (Opcional)' : language === 'en' ? 'Vehicle Photo (Optional)' : language === 'it' ? 'Foto del Veicolo (Opzionale)' : language === 'fr' ? 'Photo du Véhicule (Optionnel)' : language === 'de' ? 'Fahrzeugfoto (Optional)' : 'Foto do Veículo (Opcional)'}
+                </label>
                 <div className="flex items-center gap-3 bg-zinc-950 p-2.5 rounded-xl border border-zinc-800">
                   {newVehicleForm.photo ? (
                     <div className="w-12 h-12 rounded-xl overflow-hidden border border-zinc-700 shrink-0">
@@ -2806,7 +2926,9 @@ export function App() {
                   )}
                   <div className="flex-1">
                     <label className="inline-block px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold text-xs cursor-pointer border border-zinc-700 transition-colors">
-                      {newVehicleForm.photo ? 'Cambiar Foto' : 'Cargar Foto de la Galería'}
+                      {newVehicleForm.photo 
+                        ? (language === 'es' ? 'Cambiar Foto' : language === 'en' ? 'Change Photo' : language === 'it' ? 'Cambia Foto' : language === 'fr' ? 'Changer la Photo' : language === 'de' ? 'Foto Ändern' : 'Mudar Foto') 
+                        : (language === 'es' ? 'Cargar Foto de la Galería' : language === 'en' ? 'Upload Photo' : language === 'it' ? 'Carica Foto' : language === 'fr' ? 'Charger une Photo' : language === 'de' ? 'Foto Hochladen' : 'Carregar Foto')}
                       <input 
                         type="file" 
                         accept="image/*" 
@@ -2826,7 +2948,7 @@ export function App() {
                         onClick={() => setNewVehicleForm({ ...newVehicleForm, photo: '' })}
                         className="ml-2 text-rose-400 hover:text-rose-300 text-[11px] underline"
                       >
-                        Quitar
+                        {language === 'es' ? 'Quitar' : language === 'en' ? 'Remove' : language === 'it' ? 'Rimuovi' : language === 'fr' ? 'Supprimer' : language === 'de' ? 'Entfernen' : 'Remover'}
                       </button>
                     )}
                   </div>
@@ -2851,7 +2973,7 @@ export function App() {
                     : language === 'it'
                     ? 'Lascialo vuoto se non si applica al tuo paese o veicolo.'
                     : language === 'fr'
-                    ? "Laissez vide si cela ne s'applique pas à votre pays ou véhicule."
+                    ? "Laissez vide si cela ne s'applique pas à votre pays ou vehículo."
                     : language === 'de'
                     ? 'Lasse es leer, wenn dies in deinem Land oder für dein Fahrzeug nicht zutrifft.'
                     : 'Deixa em branco se não se aplicar ao teu país ou veículo.'}
@@ -2886,7 +3008,9 @@ export function App() {
               </div>
 
               <div>
-                <label className="block text-zinc-400 font-medium mb-1">Icono Representativo</label>
+                <label className="block text-zinc-400 font-medium mb-1">
+                  {language === 'es' ? 'Icono Representativo' : language === 'en' ? 'Representative Icon' : language === 'it' ? 'Icona Rappresentativa' : language === 'fr' ? 'Icône Représentative' : language === 'de' ? 'Fahrzeug-Symbol' : 'Ícone Representativo'}
+                </label>
                 <div className="flex items-center gap-2">
                   {['🏍️', '🌍', '🛻', '🏎️', '🚜', '🚐'].map(icon => (
                     <button
@@ -2907,7 +3031,9 @@ export function App() {
 
               <div className="pt-2">
                 <button type="submit" className="w-full py-3.5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm transition-all shadow-lg shadow-orange-500/25 active:scale-95">
-                  Guardar Vehículo
+                  {editingVehicleId 
+                    ? (language === 'es' ? 'Guardar Cambios' : language === 'en' ? 'Save Changes' : language === 'it' ? 'Salva Modifiche' : language === 'fr' ? 'Enregistrer les Modifications' : language === 'de' ? 'Änderungen Speichern' : 'Guardar Alterações')
+                    : (language === 'es' ? 'Guardar Vehículo' : language === 'en' ? 'Save Vehicle' : language === 'it' ? 'Salva Veicolo' : language === 'fr' ? 'Enregistrer le Véhicule' : language === 'de' ? 'Fahrzeug Speichern' : 'Guardar Veículo')}
                 </button>
               </div>
             </form>

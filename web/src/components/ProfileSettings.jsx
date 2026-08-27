@@ -9,6 +9,7 @@ export function ProfileSettings({
   language, setLanguage, t,
   currency, setCurrency,
   userEmail, handleLogout,
+  firebaseUser, handleResendVerification, verificationInFlight, verificationSuccess,
   pushPermissionStatus, handleEnablePushNotifications, pushRequestInFlight,
   handleSendTestPush, testPushInFlight,
   currentPlanDef, currentPlan,
@@ -21,6 +22,9 @@ export function ProfileSettings({
   myTransactions,
   handleExportJSON, handleExportCSV, handleImportJSON,
 }) {
+  const isPasswordUser = firebaseUser?.providerData?.some(p => p.providerId === 'password');
+  const isEmailVerified = firebaseUser?.emailVerified === true;
+
   return (
     <div className="space-y-6 max-w-2xl">
       <div className="flex items-center justify-between">
@@ -29,34 +33,63 @@ export function ProfileSettings({
             {language === 'es' ? 'Perfil & Ajustes' : language === 'en' ? 'Profile & Settings' : language === 'it' ? 'Profilo & Impostazioni' : language === 'fr' ? 'Profil & Paramètres' : language === 'de' ? 'Profil & Einstellungen' : 'Perfil & Definições'}
           </h2>
           <p className="text-xs text-zinc-400 mt-0.5">
-            {language === 'es' ? 'Configuración de idioma, cuenta y plan de suscripción.' : language === 'en' ? 'Language, account, and subscription plan settings.' : language === 'it' ? 'Lingua, conto e impostazioni del piano di abbonamento.' : language === 'fr' ? "Paramètres de langue, compte et plan d'abonnement." : language === 'de' ? 'Sprach-, Konto- und Abo-Plan-Einstellungen.' : 'Configurações de idioma, conta e plano de subscrição.'}
+            {language === 'es' ? 'Configuración de idioma, cuenta y plan de suscripción.' : language === 'en' ? 'Language, account, and subscription plan settings.' : language === 'it' ? 'Configurazione lingua, account e piano di abbonamento.' : language === 'fr' ? 'Configuration de la langue, du compte et du plan.' : language === 'de' ? 'Sprach-, Konto- und Abo-Einstellungen.' : 'Configuração de idioma, conta e plano de subscrição.'}
           </p>
         </div>
         <button
           onClick={handleLogout}
-          className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-xs font-bold transition-all active:scale-95 flex items-center gap-1.5"
+          className="px-3.5 py-2 rounded-2xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-xs font-bold transition-all active:scale-95 flex items-center gap-1.5"
         >
-          <User className="w-3.5 h-3.5" />
           <span>{language === 'es' ? 'Cerrar Sesión' : language === 'en' ? 'Log Out' : language === 'it' ? 'Esci' : language === 'fr' ? 'Se Déconnecter' : language === 'de' ? 'Abmelden' : 'Terminar Sessão'}</span>
         </button>
       </div>
 
       {/* SECTOR: USUARIO CONECTADO */}
-      <div className="bg-zinc-900/80 p-5 rounded-3xl border border-zinc-800 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400 font-bold text-lg">
-            {userEmail.charAt(0).toUpperCase()}
+      <div className="bg-zinc-900/80 p-5 rounded-3xl border border-zinc-800 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400 font-bold text-lg">
+              {userEmail.charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <span className="text-[10px] font-mono text-zinc-500 uppercase font-bold block">
+                {language === 'es' ? 'Cuenta Activa' : language === 'en' ? 'Logged in as' : language === 'it' ? 'Account Attivo' : language === 'fr' ? 'Compte Actif' : language === 'de' ? 'Aktives Konto' : 'Conta Ativa'}
+              </span>
+              <p className="text-sm font-bold text-white font-mono">{userEmail}</p>
+            </div>
           </div>
-          <div>
-            <span className="text-[10px] font-mono text-zinc-500 uppercase font-bold block">
-              {language === 'es' ? 'Cuenta Activa' : language === 'en' ? 'Logged in as' : language === 'it' ? 'Account Attivo' : language === 'fr' ? 'Compte Actif' : language === 'de' ? 'Aktives Konto' : 'Conta Ativa'}
-            </span>
-            <p className="text-sm font-bold text-white font-mono">{userEmail}</p>
+          <div className="flex items-center gap-2">
+            {isEmailVerified ? (
+              <span className="text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-full font-bold">
+                ✓ {language === 'es' ? 'Verificado' : language === 'en' ? 'Verified' : language === 'it' ? 'Verificato' : language === 'fr' ? 'Vérifié' : language === 'de' ? 'Verifiziert' : 'Verificado'}
+              </span>
+            ) : (
+              <span className="text-[10px] font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2.5 py-1 rounded-full font-bold">
+                ● {language === 'es' ? 'Sin verificar' : language === 'en' ? 'Unverified' : language === 'it' ? 'Non verificato' : language === 'fr' ? 'Non vérifié' : language === 'de' ? 'Nicht verifiziert' : 'Não verificado'}
+              </span>
+            )}
           </div>
         </div>
-        <span className="text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-full font-bold">
-          ● Online
-        </span>
+
+        {isPasswordUser && !isEmailVerified && (
+          <div className="pt-2 border-t border-zinc-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <p className="text-[11px] text-zinc-400">
+              {language === 'es' ? 'Tu dirección de correo aún no está verificada.' : language === 'en' ? 'Your email address is not verified yet.' : language === 'it' ? 'Il tuo indirizzo email non è ancora verificato.' : language === 'fr' ? "Votre adresse e-mail n'est pas encore vérifiée." : language === 'de' ? 'Deine E-Mail-Adresse ist noch nicht verifiziert.' : 'O teu endereço de email ainda não está verificado.'}
+            </p>
+            <button
+              type="button"
+              onClick={handleResendVerification}
+              disabled={verificationInFlight || verificationSuccess}
+              className="self-start sm:self-auto px-3 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-xl text-[11px] font-semibold transition-all disabled:opacity-50"
+            >
+              {verificationSuccess
+                ? (language === 'es' ? '✓ Enlace enviado' : language === 'en' ? '✓ Link sent' : language === 'it' ? '✓ Link inviato' : language === 'fr' ? '✓ Lien envoyé' : language === 'de' ? '✓ Link gesendet' : '✓ Link enviado')
+                : verificationInFlight
+                ? (language === 'es' ? 'Enviando...' : 'Sending...')
+                : (language === 'es' ? 'Reenviar enlace de verificación' : language === 'en' ? 'Resend verification link' : language === 'it' ? 'Reinvia link di verifica' : language === 'fr' ? 'Renvoyer le lien de vérification' : language === 'de' ? 'Bestätigungslink erneut senden' : 'Reenviar link de verificação')}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* SECTOR: SELECCIÓN DE IDIOMA */}
