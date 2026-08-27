@@ -18,6 +18,12 @@ const messaging = getMessaging();
 
 const STRIPE_SECRET_KEY = defineSecret('STRIPE_SECRET_KEY');
 const STRIPE_WEBHOOK_SECRET = defineSecret('STRIPE_WEBHOOK_SECRET');
+const RESEND_API_KEY = defineSecret('RESEND_API_KEY');
+
+// Remitente de los correos enviados desde el Backoffice. El dominio tiene que estar verificado en
+// Resend (Dashboard → Domains → añadir mygarageops.com y crear los registros DNS que pida en IONOS)
+// o Resend rechaza el envío.
+const EMAIL_FROM = 'MyGarageOps <hola@mygarageops.com>';
 
 // URL base de la app privada, usada para las redirecciones de vuelta desde Stripe Checkout / Portal
 const APP_URL = 'https://app.mygarageops.com';
@@ -524,4 +530,79 @@ export const syncPlanToStripe = onDocumentUpdated({ document: 'plans/{planId}', 
   } catch (err) {
     logger.error(`Error sincronizando el plan ${planId} con Stripe`, err);
   }
+});
+
+// Envía un email a un usuario, a todos los usuarios de un plan, o a todos, vía Resend. Resend acepta
+// hasta 100 destinatarios por llamada a /emails/batch, así que se trocea la lista si hace falta.
+async function sendResendBatch(apiKey, emails) {
+  const res = await fetch('https://api.resend.com/emails/batch', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(emails)
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Resend respondió ${res.status}: ${body}`);
+  }
+}
+
+// Callable: envía un correo a un usuario, a todos los usuarios de un plan concreto, o a todos los
+// usuarios (solo admins). El contenido (asunto/HTML) lo escribe el admin desde el Backoffice — no hay
+// nada que sanear aquí porque quien lo escribe ya tiene acceso total sobre los datos de los usuarios.
+export const sendUserEmail = onCall({ enforceAppCheck: true, secrets: [RESEND_API_KEY], timeoutSeconds: 120 }, async (request) => {
+  const callerUid = request.auth?.uid;
+  if (!callerUid) throw new HttpsError('unauthenticated', 'Debes iniciar sesión.');
+
+  const callerSnap = await db.collection('users').doc(callerUid).get();
+  if (callerSnap.data()?.role !== 'admin') {
+    throw new HttpsError('permission-denied', 'Solo un administrador puede enviar correos.');
+  }
+
+  const { audience, planId, targetUid, subject, html } = request.data || {};
+  if (!subject?.trim() || !html?.trim()) {
+    throw new HttpsError('invalid-argument', 'Faltan el asunto o el contenido del correo.');
+  }
+  if (!['all', 'plan', 'user'].includes(audience)) {
+    throw new HttpsError('invalid-argument', 'audience debe ser "all", "plan" o "user".');
+  }
+
+  let recipients;
+  if (audience === 'user') {
+    if (!targetUid) throw new HttpsError('invalid-argument', 'Falta targetUid.');
+    const snap = await db.collection('users').doc(targetUid).get();
+    const email = snap.data()?.email;
+    if (!email) throw new HttpsError('not-found', 'Ese usuario no existe o no tiene email.');
+    recipients = [email];
+  } else {
+    let query = db.collection('users');
+    if (audience === 'plan') {
+      if (!planId) throw new HttpsError('invalid-argument', 'Falta planId.');
+      query = query.where('plan', '==', planId);
+    }
+    const snap = await query.get();
+    recipients = snap.docs.map(d => d.data().email).filter(Boolean);
+  }
+
+  if (recipients.length === 0) {
+    return { sent: 0, message: 'No hay ningún destinatario para esos criterios.' };
+  }
+
+  const apiKey = RESEND_API_KEY.value();
+  const errors = [];
+  for (let i = 0; i < recipients.length; i += 100) {
+    const batch = recipients.slice(i, i + 100).map(to => ({ from: EMAIL_FROM, to, subject, html }));
+    try {
+      await sendResendBatch(apiKey, batch);
+    } catch (err) {
+      logger.error(`Error enviando lote de correos (destinatarios ${i}-${i + batch.length})`, err);
+      errors.push(err.message);
+    }
+  }
+
+  logger.info(`sendUserEmail: ${recipients.length - errors.length}/${recipients.length} enviados por ${callerUid} (audience=${audience})`);
+
+  if (errors.length > 0) {
+    throw new HttpsError('internal', `Se enviaron algunos correos, pero hubo errores: ${errors.join('; ')}`);
+  }
+  return { sent: recipients.length };
 });
