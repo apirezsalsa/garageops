@@ -9,7 +9,7 @@ export function ProfileSettings({
   language, setLanguage, t,
   currency, setCurrency,
   userEmail, handleLogout,
-  firebaseUser, handleResendVerification, verificationInFlight, verificationSuccess,
+  isEmailVerified, needsEmailVerification, handleResendVerification, verificationInFlight, verificationSuccess,
   pushPermissionStatus, handleEnablePushNotifications, pushRequestInFlight,
   handleSendTestPush, testPushInFlight,
   currentPlanDef, currentPlan,
@@ -22,9 +22,6 @@ export function ProfileSettings({
   myTransactions,
   handleExportJSON, handleExportCSV, handleImportJSON,
 }) {
-  const isPasswordUser = firebaseUser?.providerData?.some(p => p.providerId === 'password');
-  const isEmailVerified = firebaseUser?.emailVerified === true;
-
   return (
     <div className="space-y-6 max-w-2xl">
       <div className="flex items-center justify-between">
@@ -71,7 +68,7 @@ export function ProfileSettings({
           </div>
         </div>
 
-        {isPasswordUser && !isEmailVerified && (
+        {needsEmailVerification && (
           <div className="pt-2 border-t border-zinc-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <p className="text-[11px] text-zinc-400">
               {language === 'es' ? 'Tu dirección de correo aún no está verificada.' : language === 'en' ? 'Your email address is not verified yet.' : language === 'it' ? 'Il tuo indirizzo email non è ancora verificato.' : language === 'fr' ? "Votre adresse e-mail n'est pas encore vérifiée." : language === 'de' ? 'Deine E-Mail-Adresse ist noch nicht verifiziert.' : 'O teu endereço de email ainda não está verificado.'}

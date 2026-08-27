@@ -539,6 +539,32 @@ export function App() {
     }
   };
 
+  // auth.currentUser.reload() no dispara onAuthStateChanged ni re-renderiza por sí solo: sin esto,
+  // si el usuario verifica su correo en otra pestaña y vuelve a esta, el aviso de "sin verificar"
+  // se queda ahí hasta que recargue la página a mano (o hasta que el token expire, ~1h después).
+  useEffect(() => {
+    if (!firebaseUser || firebaseUser.emailVerified) return;
+    const refreshVerifiedStatus = () => {
+      if (document.visibilityState !== 'visible' || !auth.currentUser) return;
+      auth.currentUser.reload()
+        .then(() => {
+          if (auth.currentUser) setFirebaseUser({ ...auth.currentUser });
+        })
+        .catch(() => {});
+    };
+    document.addEventListener('visibilitychange', refreshVerifiedStatus);
+    window.addEventListener('focus', refreshVerifiedStatus);
+    return () => {
+      document.removeEventListener('visibilitychange', refreshVerifiedStatus);
+      window.removeEventListener('focus', refreshVerifiedStatus);
+    };
+  }, [firebaseUser?.uid, firebaseUser?.emailVerified]);
+
+  // Calculado una sola vez y compartido con ProfileSettings, para que el banner del header y el
+  // badge de Ajustes nunca puedan discrepar sobre si la cuenta necesita verificar su email.
+  const isEmailVerified = firebaseUser?.emailVerified === true;
+  const needsEmailVerification = !!firebaseUser && !isEmailVerified && firebaseUser.providerData?.some(p => p.providerId === 'password');
+
   const handleGoogleLogin = async () => {
     setLoginError('');
     try {
@@ -563,6 +589,10 @@ export function App() {
 
   const handleLogout = async () => {
     resetAnalyticsUser();
+    // Si no se resetean, el siguiente usuario que inicie sesión en la misma pestaña hereda el
+    // "✓ Enviado" deshabilitado de la cuenta anterior sin poder pedir su propia verificación.
+    setVerificationInFlight(false);
+    setVerificationSuccess(false);
     await signOut(auth);
   };
 
@@ -2341,7 +2371,7 @@ export function App() {
           </div>
         </header>
 
-        {firebaseUser && !firebaseUser.emailVerified && firebaseUser.providerData?.some(p => p.providerId === 'password') && (
+        {needsEmailVerification && (
           <div className="bg-amber-500/10 border border-amber-500/30 text-amber-300 px-4 py-2.5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs mb-6 animate-in fade-in duration-200">
             <div className="flex items-center gap-2">
               <Mail className="w-4 h-4 text-amber-400 shrink-0" />
@@ -2431,7 +2461,7 @@ export function App() {
             language={language} setLanguage={setLanguage} t={t}
             currency={currency} setCurrency={setCurrency}
             userEmail={userEmail} handleLogout={handleLogout}
-            firebaseUser={firebaseUser} handleResendVerification={handleResendVerification} verificationInFlight={verificationInFlight} verificationSuccess={verificationSuccess}
+            isEmailVerified={isEmailVerified} needsEmailVerification={needsEmailVerification} handleResendVerification={handleResendVerification} verificationInFlight={verificationInFlight} verificationSuccess={verificationSuccess}
             pushPermissionStatus={pushPermissionStatus} handleEnablePushNotifications={handleEnablePushNotifications} pushRequestInFlight={pushRequestInFlight}
             handleSendTestPush={handleSendTestPush} testPushInFlight={testPushInFlight}
             currentPlanDef={currentPlanDef} currentPlan={currentPlan}
