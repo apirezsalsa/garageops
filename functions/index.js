@@ -645,3 +645,70 @@ export const sendUserEmail = onCall({ enforceAppCheck: true, secrets: [RESEND_AP
   }
   return { sent: recipients.length };
 });
+
+// Botón CTA reutilizado en los dos correos transaccionales de abajo (verificación / recuperación).
+function emailCtaButton(url, label) {
+  return `<p style="text-align:center; margin:28px 0;">
+    <a href="${url}" style="background-color:#f97316; color:#ffffff; padding:12px 28px; border-radius:999px; text-decoration:none; font-weight:600; display:inline-block; font-size:14px;">${label}</a>
+  </p>`;
+}
+
+// Callable: envía el correo de verificación de cuenta con nuestra propia plantilla (logo + firma) en
+// vez del que manda Firebase Auth por defecto — cuyo editor de plantillas tiene un bug conocido en la
+// consola y no se puede personalizar desde ahí. El enlace en sí lo sigue generando/validando Firebase
+// (generateEmailVerificationLink, Admin SDK); solo cambiamos quién manda el correo y cómo se ve.
+export const sendVerificationEmailLink = onCall({ enforceAppCheck: true, secrets: [RESEND_API_KEY] }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Debes iniciar sesión.');
+
+  const userRecord = await auth.getUser(uid);
+  if (!userRecord.email) throw new HttpsError('failed-precondition', 'Esta cuenta no tiene un correo asociado.');
+  if (userRecord.emailVerified) return { sent: false, alreadyVerified: true };
+
+  let link;
+  try {
+    link = await auth.generateEmailVerificationLink(userRecord.email, { url: APP_URL });
+  } catch (err) {
+    logger.error('Error generando el enlace de verificación', err);
+    if (err.code === 'auth/too-many-requests') throw new HttpsError('resource-exhausted', 'Demasiados intentos. Espera unos minutos.');
+    throw new HttpsError('internal', 'No se pudo generar el enlace de verificación.');
+  }
+
+  const html = wrapEmailTemplate(`
+    <p style="margin-top:0;">Hola,</p>
+    <p>Confirma tu correo electrónico para activar todas las funciones de tu cuenta en MyGarageOps.</p>
+    ${emailCtaButton(link, 'Verificar mi correo')}
+    <p style="color:#71717a; font-size:12px; margin-bottom:0;">Si no has creado una cuenta en MyGarageOps, puedes ignorar este correo.</p>
+  `);
+
+  await sendResendBatch(RESEND_API_KEY.value(), [{ from: EMAIL_FROM, to: userRecord.email, subject: 'Verifica tu correo · MyGarageOps', html }]);
+  return { sent: true };
+});
+
+// Callable: igual que la de arriba pero para el enlace de restablecer contraseña. Sin
+// enforceAppCheck de auth (no requiere sesión: se pide desde la propia pantalla de login).
+export const sendPasswordResetEmailLink = onCall({ enforceAppCheck: true, secrets: [RESEND_API_KEY] }, async (request) => {
+  const email = (request.data?.email || '').trim();
+  if (!email) throw new HttpsError('invalid-argument', 'Falta el correo electrónico.');
+
+  let link;
+  try {
+    link = await auth.generatePasswordResetLink(email, { url: APP_URL });
+  } catch (err) {
+    if (err.code === 'auth/user-not-found') throw new HttpsError('not-found', 'No existe ninguna cuenta con ese correo.');
+    if (err.code === 'auth/invalid-email') throw new HttpsError('invalid-argument', 'Correo electrónico no válido.');
+    if (err.code === 'auth/too-many-requests') throw new HttpsError('resource-exhausted', 'Demasiados intentos. Espera unos minutos.');
+    logger.error('Error generando el enlace de recuperación de contraseña', err);
+    throw new HttpsError('internal', 'No se pudo generar el enlace de recuperación.');
+  }
+
+  const html = wrapEmailTemplate(`
+    <p style="margin-top:0;">Hola,</p>
+    <p>Hemos recibido una solicitud para restablecer la contraseña de tu cuenta en MyGarageOps.</p>
+    ${emailCtaButton(link, 'Restablecer contraseña')}
+    <p style="color:#71717a; font-size:12px; margin-bottom:0;">Si no has solicitado esto, puedes ignorar este correo — tu contraseña actual seguirá funcionando.</p>
+  `);
+
+  await sendResendBatch(RESEND_API_KEY.value(), [{ from: EMAIL_FROM, to: email, subject: 'Restablece tu contraseña · MyGarageOps', html }]);
+  return { sent: true };
+});

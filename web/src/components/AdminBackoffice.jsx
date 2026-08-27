@@ -637,7 +637,7 @@ export function AdminBackoffice({
                 <Mail className="w-4 h-4 text-orange-400" />
                 <span>Enviar correo</span>
               </h3>
-              <p className="text-xs text-zinc-400 mt-0.5">Se envía desde MyGarageOps &lt;hola@mygarageops.com&gt; vía Resend.</p>
+              <p className="text-xs text-zinc-400 mt-0.5">Se envía desde MyGarageOps &lt;soporte@mygarageops.com&gt; vía Resend.</p>
             </div>
 
             <div>

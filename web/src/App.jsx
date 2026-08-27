@@ -10,9 +10,7 @@ import {
   signInWithPopup,
   GoogleAuthProvider,
   OAuthProvider,
-  signOut,
-  sendEmailVerification,
-  sendPasswordResetEmail
+  signOut
 } from 'firebase/auth';
 import { 
   collection, 
@@ -435,9 +433,10 @@ export function App() {
     try {
       if (isRegisterMode) {
         const cred = await createUserWithEmailAndPassword(auth, loginForm.email, loginForm.password);
-        // Enviar correo de verificación inicial de Firebase Auth
+        // Correo de verificación inicial, con nuestra propia plantilla (vía Cloud Function + Resend)
+        // en vez del correo por defecto de Firebase Auth — ver sendVerificationEmailLink.
         try {
-          await sendEmailVerification(cred.user);
+          await httpsCallable(functions, 'sendVerificationEmailLink')();
         } catch (verifErr) {
           console.warn('No se pudo enviar correo de verificación inicial:', verifErr);
         }
@@ -494,17 +493,20 @@ export function App() {
     }
     setResetEmailLoading(true);
     try {
-      await sendPasswordResetEmail(auth, targetEmail);
+      // Vía Cloud Function + Resend (nuestra plantilla), en vez del correo por defecto de Firebase
+      // Auth — ver sendPasswordResetEmailLink.
+      await httpsCallable(functions, 'sendPasswordResetEmailLink')({ email: targetEmail });
       setNoticeModal({
         title: language === 'es' ? 'Correo de Recuperación Enviado' : language === 'en' ? 'Recovery Email Sent' : language === 'it' ? 'Email di Recupero Inviata' : language === 'fr' ? 'E-mail de Récupération Envoyé' : language === 'de' ? 'Wiederherstellungs-E-Mail Gesendet' : 'Email de Recuperação Enviado',
         message: language === 'es' ? `Hemos enviado un enlace para restablecer tu contraseña a ${targetEmail}. Revisa tu bandeja de entrada o la carpeta de spam.` : language === 'en' ? `We sent a password reset link to ${targetEmail}. Please check your inbox or spam folder.` : language === 'it' ? `Abbiamo inviato un link per reimpostare la password a ${targetEmail}. Controlla la posta in arrivo o lo spam.` : language === 'fr' ? `Nous avons envoyé un lien pour réinitialiser votre mot de passe à ${targetEmail}. Vérifiez votre boîte de réception ou vos spams.` : language === 'de' ? `Wir haben einen Link zum Zurücksetzen deines Passworts an ${targetEmail} gesendet. Bitte überprüfe deinen Posteingang oder Spam-Ordner.` : `Enviámos um link para repor a tua palavra-passe para ${targetEmail}. Verifica a tua caixa de entrada ou spam.`,
         type: 'success'
       });
     } catch (err) {
+      // err.code de una Cloud Function callable llega como "functions/<código>", no como "auth/<código>".
       const errorMap = {
-        'auth/user-not-found': language === 'es' ? 'No existe ninguna cuenta con ese correo' : 'No account found with this email',
-        'auth/invalid-email': language === 'es' ? 'Correo electrónico no válido' : 'Invalid email address',
-        'auth/too-many-requests': language === 'es' ? 'Demasiados intentos. Espera unos minutos.' : 'Too many attempts. Please wait a few minutes.'
+        'functions/not-found': language === 'es' ? 'No existe ninguna cuenta con ese correo' : 'No account found with this email',
+        'functions/invalid-argument': language === 'es' ? 'Correo electrónico no válido' : 'Invalid email address',
+        'functions/resource-exhausted': language === 'es' ? 'Demasiados intentos. Espera unos minutos.' : 'Too many attempts. Please wait a few minutes.'
       };
       setLoginError(errorMap[err.code] || err.message);
     } finally {
@@ -518,7 +520,7 @@ export function App() {
     if (!firebaseUser || verificationInFlight) return;
     setVerificationInFlight(true);
     try {
-      await sendEmailVerification(firebaseUser);
+      await httpsCallable(functions, 'sendVerificationEmailLink')();
       setVerificationSuccess(true);
       setNoticeModal({
         title: language === 'es' ? 'Enlace de Verificación Enviado' : language === 'en' ? 'Verification Link Sent' : language === 'it' ? 'Link di Verifica Inviato' : language === 'fr' ? 'Lien de Vérification Envoyé' : language === 'de' ? 'Bestätigungslink Gesendet' : 'Link de Verificação Enviado',
@@ -529,7 +531,7 @@ export function App() {
       console.warn('Error al reenviar verificación de email:', err);
       setNoticeModal({
         title: 'Error',
-        message: err.code === 'auth/too-many-requests'
+        message: err.code === 'functions/resource-exhausted'
           ? (language === 'es' ? 'Demasiados intentos. Espera unos minutos antes de volver a solicitarlo.' : 'Too many requests. Please wait a few minutes.')
           : (language === 'es' ? 'No se pudo enviar el correo de verificación.' : 'Could not send verification email.'),
         type: 'warning'
