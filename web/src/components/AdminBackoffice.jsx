@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { collection, doc, addDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import {
-  Users, Bike, Zap, TrendingUp, FileText, Search, Plus, Edit2, Trash2, ChevronRight, ArrowUpRight, Shield
+  Users, Bike, Zap, TrendingUp, FileText, Search, Plus, Edit2, Trash2, ChevronRight, ArrowUpRight, Shield, Mail
 } from 'lucide-react';
 import { db, functions } from '../firebase';
 import { computePlanStats } from '../utils/billing';
@@ -32,6 +32,70 @@ export function AdminBackoffice({
   const [giftDaysInput, setGiftDaysInput] = useState('30');
   const [transactionSearch, setTransactionSearch] = useState('');
   const [transactionTypeFilter, setTransactionTypeFilter] = useState('all');
+
+  // Comunicación por email (Resend, vía Cloud Function sendUserEmail)
+  const [commAudience, setCommAudience] = useState('all'); // 'all' | 'plan' | 'user'
+  const [commPlanId, setCommPlanId] = useState('');
+  const [commTargetUid, setCommTargetUid] = useState('');
+  const [commSubject, setCommSubject] = useState('');
+  const [commBody, setCommBody] = useState('');
+  const [commSending, setCommSending] = useState(false);
+
+  const commRecipientCount = commAudience === 'all'
+    ? allUsersList.length
+    : commAudience === 'plan'
+      ? allUsersList.filter(u => u.plan === commPlanId).length
+      : commTargetUid ? 1 : 0;
+
+  const handleSendComm = () => {
+    if (!commSubject.trim() || !commBody.trim()) {
+      setNoticeModal({ title: 'Faltan datos', message: 'Escribe un asunto y un mensaje antes de enviar.', type: 'warning' });
+      return;
+    }
+    if (commAudience === 'plan' && !commPlanId) {
+      setNoticeModal({ title: 'Falta el plan', message: 'Elige a qué plan quieres escribir.', type: 'warning' });
+      return;
+    }
+    if (commAudience === 'user' && !commTargetUid) {
+      setNoticeModal({ title: 'Falta el usuario', message: 'Elige a qué usuario quieres escribir.', type: 'warning' });
+      return;
+    }
+    if (commRecipientCount === 0) {
+      setNoticeModal({ title: 'Sin destinatarios', message: 'No hay ningún usuario que cumpla ese criterio.', type: 'warning' });
+      return;
+    }
+
+    const html = commBody.trim().split('\n').map(line => `<p>${line || '&nbsp;'}</p>`).join('');
+
+    setConfirmModal({
+      title: '¿Enviar correo?',
+      message: `Se enviará a ${commRecipientCount} destinatario${commRecipientCount !== 1 ? 's' : ''}. Esta acción no se puede deshacer.`,
+      tone: 'default',
+      icon: Mail,
+      confirmLabel: 'Enviar correo',
+      onConfirm: async () => {
+        setCommSending(true);
+        try {
+          const sendUserEmailFn = httpsCallable(functions, 'sendUserEmail');
+          const { data } = await sendUserEmailFn({
+            audience: commAudience,
+            planId: commAudience === 'plan' ? commPlanId : undefined,
+            targetUid: commAudience === 'user' ? commTargetUid : undefined,
+            subject: commSubject.trim(),
+            html
+          });
+          setNoticeModal({ title: 'Correo Enviado', message: `Se ha enviado a ${data.sent} destinatario${data.sent !== 1 ? 's' : ''}.`, type: 'success' });
+          setCommSubject('');
+          setCommBody('');
+        } catch (err) {
+          console.error('Error al enviar el correo:', err);
+          setNoticeModal({ title: 'Error', message: err.message || 'No se pudo enviar el correo.', type: 'warning' });
+        } finally {
+          setCommSending(false);
+        }
+      }
+    });
+  };
 
   const handleDeleteUser = (targetUser) => {
     setConfirmModal({
@@ -219,6 +283,14 @@ export function AdminBackoffice({
             }`}
           >
             <FileText className="w-3.5 h-3.5" /> Transacciones
+          </button>
+          <button
+            onClick={() => setAdminSubTab('comm')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+              adminSubTab === 'comm' ? 'bg-orange-500 text-white shadow' : 'text-zinc-400 hover:text-white'
+            }`}
+          >
+            <Mail className="w-3.5 h-3.5" /> Comunicación
           </button>
         </div>
 
@@ -556,6 +628,103 @@ export function AdminBackoffice({
           </div>
           );
         })()}
+
+        {/* COMUNICACIÓN — enviar un email a un usuario, a un plan, o a todos (vía Resend) */}
+        {adminSubTab === 'comm' && (
+          <div className="bg-zinc-900/80 p-6 rounded-3xl border border-zinc-800 space-y-5 shadow-xl max-w-2xl">
+            <div className="pb-3 border-b border-zinc-800">
+              <h3 className="font-bold text-base text-white flex items-center gap-2">
+                <Mail className="w-4 h-4 text-orange-400" />
+                <span>Enviar correo</span>
+              </h3>
+              <p className="text-xs text-zinc-400 mt-0.5">Se envía desde MyGarageOps &lt;hola@mygarageops.com&gt; vía Resend.</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-zinc-400 mb-2">Destinatarios</label>
+              <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-2xl border border-zinc-800 w-fit">
+                {[
+                  { id: 'all', label: 'Todos' },
+                  { id: 'plan', label: 'Por plan' },
+                  { id: 'user', label: 'Un usuario' },
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setCommAudience(opt.id)}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      commAudience === opt.id ? 'bg-orange-500 text-white shadow' : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              {commAudience === 'plan' && (
+                <select
+                  value={commPlanId}
+                  onChange={(e) => setCommPlanId(e.target.value)}
+                  className="mt-3 w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-200 outline-none focus:border-orange-500"
+                >
+                  <option value="">Elige un plan…</option>
+                  {plans.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              )}
+
+              {commAudience === 'user' && (
+                <select
+                  value={commTargetUid}
+                  onChange={(e) => setCommTargetUid(e.target.value)}
+                  className="mt-3 w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-200 outline-none focus:border-orange-500"
+                >
+                  <option value="">Elige un usuario…</option>
+                  {allUsersList.map(u => (
+                    <option key={u.id} value={u.id}>{u.email}</option>
+                  ))}
+                </select>
+              )}
+
+              <p className="mt-2 text-[11px] text-zinc-500 font-mono">
+                {commRecipientCount} destinatario{commRecipientCount !== 1 ? 's' : ''}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-zinc-400 mb-2">Asunto</label>
+              <input
+                type="text"
+                value={commSubject}
+                onChange={(e) => setCommSubject(e.target.value)}
+                placeholder="Ej: Novedades en MyGarageOps"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-sm text-zinc-200 outline-none focus:border-orange-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-zinc-400 mb-2">Mensaje</label>
+              <textarea
+                value={commBody}
+                onChange={(e) => setCommBody(e.target.value)}
+                rows={8}
+                placeholder="Escribe el mensaje. Cada línea se envía como un párrafo."
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-sm text-zinc-200 outline-none focus:border-orange-500 resize-y"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleSendComm}
+              disabled={commSending}
+              className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-white text-xs font-bold transition-all active:scale-95 disabled:opacity-50 flex items-center gap-1.5"
+            >
+              <Mail className="w-3.5 h-3.5" />
+              {commSending ? 'Enviando…' : 'Enviar correo'}
+            </button>
+          </div>
+        )}
       </div>
 
       {selectedAdminUser && (() => {

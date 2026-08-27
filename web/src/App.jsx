@@ -3516,13 +3516,19 @@ export function App() {
       )}
 
       {/* MODAL PERSONALIZADO DE CONFIRMACIÓN DE BORRADO */}
-      {confirmModal && (
+      {confirmModal && (() => {
+        // Por defecto el modal asume una acción destructiva (borrado); pasar tone: 'default' +
+        // icon/confirmLabel propios para reutilizarlo en confirmaciones no destructivas (p.ej. enviar
+        // un correo masivo desde el Backoffice), sin tocar el aspecto de los borrados existentes.
+        const isDanger = confirmModal.tone !== 'default';
+        const ConfirmIcon = confirmModal.icon || Trash2;
+        return (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-zinc-900 rounded-3xl border border-zinc-800 p-6 space-y-4 shadow-2xl animate-in zoom-in-95 duration-150">
-            <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 mx-auto">
-              <Trash2 className="w-6 h-6 stroke-[2]" />
+            <div className={`w-12 h-12 rounded-2xl border flex items-center justify-center mx-auto ${isDanger ? 'bg-rose-500/10 border-rose-500/20 text-rose-400' : 'bg-orange-500/10 border-orange-500/20 text-orange-400'}`}>
+              <ConfirmIcon className="w-6 h-6 stroke-[2]" />
             </div>
-            
+
             <div className="text-center space-y-1">
               <h3 className="font-extrabold text-base text-white tracking-tight">{confirmModal.title}</h3>
               <p className="text-xs text-zinc-400 leading-relaxed">{confirmModal.message}</p>
@@ -3542,14 +3548,15 @@ export function App() {
                   if (confirmModal.onConfirm) confirmModal.onConfirm();
                   setConfirmModal(null);
                 }}
-                className="py-3 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs shadow-lg shadow-rose-500/25 transition-all active:scale-95"
+                className={`py-3 rounded-2xl text-white font-bold text-xs shadow-lg transition-all active:scale-95 ${isDanger ? 'bg-rose-500 hover:bg-rose-600 shadow-rose-500/25' : 'bg-orange-500 hover:bg-orange-400 shadow-orange-500/25'}`}
               >
-                Confirmar Borrado
+                {confirmModal.confirmLabel || 'Confirmar Borrado'}
               </button>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* MODAL PERSONALIZADO DE NOTIFICACIÓN / ALERTA CON ESTILO OSCURO */}
       {noticeModal && (
