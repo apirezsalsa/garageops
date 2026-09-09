@@ -141,7 +141,7 @@ export function PartsView({
                         className="min-h-[44px] px-2.5 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/30 text-[11px] font-bold transition-all flex items-center gap-1"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        <span>+ {language === 'es' ? 'Compra' : language === 'en' ? 'Batch' : language === 'it' ? 'Lotto' : language === 'fr' ? 'Lot' : language === 'de' ? 'Charge' : 'Lote'}</span>
+                        <span>{language === 'es' ? 'Compra' : language === 'en' ? 'Batch' : language === 'it' ? 'Lotto' : language === 'fr' ? 'Lot' : language === 'de' ? 'Charge' : 'Lote'}</span>
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); setSelectedPartForBatches(isExpanded ? null : p.id); }}
