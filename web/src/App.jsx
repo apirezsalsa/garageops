@@ -60,6 +60,9 @@ import {
   Lock,
   HelpCircle,
   Bell,
+  ChevronDown,
+  ChevronUp,
+  Package,
   X,
   ArrowLeft,
   ArrowRight,
@@ -1086,6 +1089,8 @@ export function App() {
   };
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [showAddMaintenanceModal, setShowAddMaintenanceModal] = useState(false);
+  const [showWarehousePicker, setShowWarehousePicker] = useState(false);
+  const [warehousePickerSearch, setWarehousePickerSearch] = useState('');
   const [showAddVehicleModal, setShowAddVehicleModal] = useState(false);
   const [editingVehicleId, setEditingVehicleId] = useState(null);
   const [showKmModal, setShowKmModal] = useState(null);
@@ -1589,9 +1594,11 @@ export function App() {
     const builtPartsUsed = [];
     for (const row of partsUsedRows) {
       const name = (row.name || row.manualName || '').trim();
-      const qtyStr = (row.qty || '1').trim();
-      const parsedMatch = qtyStr.match(/^([0-9]+(?:[.,][0-9]+)?)/);
+      const rawQtyStr = String(row.qty ?? '1').trim();
+      const parsedMatch = rawQtyStr.match(/^([0-9]+(?:[.,][0-9]+)?)/);
       const qtyNum = parsedMatch ? parseFloat(parsedMatch[1].replace(',', '.')) : 1;
+      const unit = (row.unit || 'ud').trim();
+      const formattedQty = `${qtyNum} ${unit}`;
 
       if (row.selectedPartId) {
         const targetPart = parts.find(p => String(p.id) === String(row.selectedPartId));
@@ -1615,7 +1622,11 @@ export function App() {
             id: targetPart.id,
             name: targetPart.name,
             reference: row.partNumber || targetPart.reference || null,
-            qty: qtyStr
+            qty: formattedQty,
+            unit: unit,
+            rawQty: qtyNum,
+            brand: row.brand || targetPart.brand || null,
+            cost: row.cost || null
           });
           continue;
         }
@@ -1626,7 +1637,11 @@ export function App() {
         id: null,
         name: name,
         reference: row.partNumber || null,
-        qty: qtyStr
+        qty: formattedQty,
+        unit: unit,
+        rawQty: qtyNum,
+        brand: row.brand || null,
+        cost: row.cost || null
       });
     }
 
@@ -1997,16 +2012,38 @@ export function App() {
     setEditingMaintenanceId(item.id);
     // Compatibilidad con registros antiguos que solo tenían un repuesto (usedPartId/usedPartName/usedPartQty)
     const partsUsedRows = item.partsUsed && item.partsUsed.length > 0
-      ? item.partsUsed.map(p => ({
-          selectedPartId: p.id ? String(p.id) : '',
-          name: p.name || '',
-          manualName: p.name || '',
-          partNumber: p.reference || '',
-          qty: String(p.qty || '1'),
-          showInventorySelect: Boolean(p.id)
-        }))
+      ? item.partsUsed.map(p => {
+          const rawQtyStr = String(p.qty || '1').trim();
+          const matchNum = rawQtyStr.match(/^([0-9]+(?:[.,][0-9]+)?)/);
+          const qtyVal = p.rawQty != null ? String(p.rawQty) : (matchNum ? matchNum[1] : rawQtyStr);
+          const matchUnit = rawQtyStr.replace(/^[0-9]+(?:[.,][0-9]+)?\s*/, '').trim();
+          const unitVal = p.unit || matchUnit || 'ud';
+          return {
+            selectedPartId: p.id ? String(p.id) : '',
+            name: p.name || '',
+            manualName: p.name || '',
+            partNumber: p.reference || '',
+            brand: p.brand || '',
+            cost: p.cost || '',
+            qty: qtyVal,
+            unit: unitVal,
+            isExpanded: Boolean(p.reference || p.brand || p.cost),
+            showInventorySelect: Boolean(p.id)
+          };
+        })
       : item.usedPartId
-        ? [{ selectedPartId: String(item.usedPartId), name: item.usedPartName, manualName: item.usedPartName, partNumber: item.partNumber || '', qty: String(item.usedPartQty || '1'), showInventorySelect: true }]
+        ? [{
+            selectedPartId: String(item.usedPartId),
+            name: item.usedPartName || '',
+            manualName: item.usedPartName || '',
+            partNumber: item.partNumber || '',
+            brand: '',
+            cost: '',
+            qty: String(item.usedPartQty || '1'),
+            unit: 'ud',
+            isExpanded: false,
+            showInventorySelect: true
+          }]
         : [];
     setNewMaintenanceForm({
       vehicle: item.vehicle,
@@ -2657,8 +2694,8 @@ export function App() {
               {/* Piezas y consumibles usados */}
               <div className="bg-zinc-950/80 p-3.5 rounded-2xl border border-zinc-800/80 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-mono text-orange-400 font-bold uppercase tracking-wider">
-                    📦 Piezas / Consumibles (Opcional)
+                  <span className="text-[11px] font-mono text-orange-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                    <Package className="w-3.5 h-3.5" /> Piezas / Consumibles (Opcional)
                   </span>
                   {newMaintenanceForm.partsUsed.length > 0 && (
                     <span className="text-[10px] text-zinc-500 font-mono">
@@ -2668,48 +2705,171 @@ export function App() {
                 </div>
 
                 {newMaintenanceForm.partsUsed.length === 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => setNewMaintenanceForm({
-                      ...newMaintenanceForm,
-                      partsUsed: [{ name: '', qty: '', selectedPartId: '', showInventorySelect: false }]
-                    })}
-                    className="w-full py-3 px-4 rounded-xl bg-zinc-900/60 border border-dashed border-zinc-800 hover:border-orange-500/50 hover:bg-zinc-900 text-zinc-400 hover:text-zinc-200 text-xs font-medium transition-all flex items-center justify-center gap-2"
-                  >
-                    <Plus className="w-4 h-4 text-orange-400" />
-                    <span>Añadir pieza o consumible (aceite, bujía, filtro...)</span>
-                  </button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setNewMaintenanceForm({
+                        ...newMaintenanceForm,
+                        partsUsed: [{ name: '', qty: '1', unit: 'ud', partNumber: '', brand: '', cost: '', selectedPartId: '', isExpanded: false }]
+                      })}
+                      className="py-3 px-3.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-orange-500/50 hover:bg-zinc-900/80 text-zinc-300 hover:text-white text-xs font-semibold transition-all flex items-center justify-center gap-2 group"
+                    >
+                      <Plus className="w-4 h-4 text-orange-400 group-hover:scale-110 transition-transform" />
+                      <span>Escribir pieza manual</span>
+                    </button>
+                    {parts.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => { setShowWarehousePicker(true); setWarehousePickerSearch(''); }}
+                        className="py-3 px-3.5 rounded-xl bg-orange-500/10 border border-orange-500/30 hover:bg-orange-500/20 text-orange-400 hover:text-orange-300 text-xs font-bold transition-all flex items-center justify-center gap-2 group"
+                      >
+                        <Package className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                        <span>Elegir de mi almacén</span>
+                      </button>
+                    )}
+                  </div>
                 ) : (
                   <div className="space-y-3">
                     {newMaintenanceForm.partsUsed.map((row, idx) => {
-                      const selectedPart = row.selectedPartId ? parts.find(p => String(p.id) === String(row.selectedPartId)) : null;
                       const updateRow = (patch) => {
                         const next = newMaintenanceForm.partsUsed.map((r, i) => i === idx ? { ...r, ...patch } : r);
                         setNewMaintenanceForm({ ...newMaintenanceForm, partsUsed: next });
                       };
+                      const removeRow = () => {
+                        setNewMaintenanceForm({
+                          ...newMaintenanceForm,
+                          partsUsed: newMaintenanceForm.partsUsed.filter((_, i) => i !== idx)
+                        });
+                      };
+
+                      if (row.selectedPartId) {
+                        const selectedPart = parts.find(p => String(p.id) === String(row.selectedPartId));
+                        const purchases = selectedPart?.purchases || [];
+                        const totalStock = purchases.reduce((sum, b) => sum + (b.qty || 0), 0);
+                        const numSpent = parseFloat(String(row.qty || '0').replace(',', '.')) || 0;
+                        const remaining = Math.round((totalStock - numSpent) * 1000) / 1000;
+                        const isOverStock = numSpent > totalStock;
+                        const unitLabel = row.unit || selectedPart?.unit || 'ud';
+
+                        return (
+                          <div key={idx} className="p-3 bg-zinc-900/90 rounded-2xl border border-zinc-800 space-y-2.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="w-7 h-7 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400 shrink-0">
+                                  <Package className="w-3.5 h-3.5" />
+                                </span>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <p className="text-xs font-bold text-zinc-100 truncate">
+                                      {selectedPart ? selectedPart.name : (row.name || 'Pieza de almacén')}
+                                    </p>
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-zinc-950 border border-zinc-800 text-zinc-400">
+                                      Stock total: <strong className="text-zinc-200">{totalStock} {unitLabel}</strong>
+                                    </span>
+                                  </div>
+                                  {(row.partNumber || selectedPart?.reference) && (
+                                    <p className="text-[10px] text-zinc-500 font-mono">
+                                      Ref: {row.partNumber || selectedPart?.reference}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={removeRow}
+                                className="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 transition-colors shrink-0"
+                                title="Eliminar pieza"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+
+                            {/* Consumo parcial de almacén */}
+                            <div className="bg-zinc-950/80 p-2.5 rounded-xl border border-zinc-800/80 space-y-2">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <label className="text-[11px] text-zinc-400 font-medium">
+                                  Cantidad usada en esta intervención:
+                                </label>
+                                <div className="flex items-center gap-1.5 self-start sm:self-auto">
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    min="0"
+                                    placeholder="1"
+                                    value={row.qty ?? ''}
+                                    onChange={(e) => updateRow({ qty: e.target.value })}
+                                    className="w-24 bg-zinc-900 border border-zinc-800 rounded-xl p-2 text-zinc-100 font-mono text-center outline-none focus:border-orange-500 text-xs font-bold"
+                                  />
+                                  <span className="px-2.5 py-2 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-300 text-xs font-mono font-medium">
+                                    {unitLabel}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Feedback en vivo */}
+                              {isOverStock ? (
+                                <div className="flex items-center gap-1.5 text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 rounded-lg">
+                                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                  <span>Aviso: la cantidad supera el stock actual disponible ({totalStock} {unitLabel})</span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1.5 rounded-lg">
+                                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                                  <span>Quedarán <strong>{Math.max(0, remaining)} {unitLabel}</strong> disponibles en tu almacén</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // Pieza manual
                       return (
-                        <div key={idx} className="p-3 bg-zinc-900/80 rounded-xl border border-zinc-800 space-y-2">
-                          <div className="flex items-center gap-2">
+                        <div key={idx} className="p-3 bg-zinc-900/90 rounded-2xl border border-zinc-800 space-y-2.5">
+                          <div className="flex items-center gap-1.5 sm:gap-2">
                             <input
                               type="text"
-                              placeholder="Ej: Aceite Motorex 2T, Filtro aire..."
+                              placeholder="Pieza o consumible (ej: Aceite 2T, Filtro...)"
                               value={row.name ?? row.manualName ?? ''}
                               onChange={(e) => updateRow({ name: e.target.value, manualName: e.target.value })}
-                              className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 text-xs font-medium placeholder:text-zinc-600"
+                              className="flex-1 min-w-[120px] bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 text-xs font-medium placeholder:text-zinc-600"
                             />
                             <input
-                              type="text"
-                              placeholder="Ej: 300 ml, 1 ud"
-                              value={row.qty || ''}
+                              type="number"
+                              step="any"
+                              min="0"
+                              placeholder="1"
+                              value={row.qty ?? ''}
                               onChange={(e) => updateRow({ qty: e.target.value })}
-                              className="w-28 sm:w-32 bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 text-xs font-medium font-mono placeholder:text-zinc-600"
+                              className="w-16 sm:w-20 bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 text-xs font-mono text-center font-bold placeholder:text-zinc-600"
                             />
+                            <select
+                              value={row.unit || 'ud'}
+                              onChange={(e) => updateRow({ unit: e.target.value })}
+                              className="w-16 sm:w-20 bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-300 outline-none focus:border-orange-500 text-xs font-mono cursor-pointer"
+                            >
+                              <option value="ud">ud</option>
+                              <option value="ml">ml</option>
+                              <option value="L">L</option>
+                              <option value="g">g</option>
+                              <option value="kg">kg</option>
+                            </select>
                             <button
                               type="button"
-                              onClick={() => setNewMaintenanceForm({
-                                ...newMaintenanceForm,
-                                partsUsed: newMaintenanceForm.partsUsed.filter((_, i) => i !== idx)
-                              })}
+                              onClick={() => updateRow({ isExpanded: !row.isExpanded })}
+                              className={`p-2.5 rounded-xl border transition-colors flex items-center justify-center shrink-0 ${
+                                row.isExpanded || row.partNumber || row.brand || row.cost
+                                  ? 'bg-orange-500/10 border-orange-500/30 text-orange-400'
+                                  : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                              }`}
+                              title="Más detalles (Nº parte, marca, coste)"
+                            >
+                              {row.isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={removeRow}
                               className="p-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 transition-colors shrink-0"
                               title="Eliminar"
                             >
@@ -2717,62 +2877,59 @@ export function App() {
                             </button>
                           </div>
 
-                          {/* Vinculación opcional con inventario de repuestos */}
-                          {parts.length > 0 && (
-                            <div className="pt-1">
-                              {!row.showInventorySelect && !row.selectedPartId ? (
-                                <button
-                                  type="button"
-                                  onClick={() => updateRow({ showInventorySelect: true })}
-                                  className="text-[11px] text-zinc-500 hover:text-orange-400 font-medium flex items-center gap-1 transition-colors"
-                                >
-                                  <span>📦 Vincular a pieza de mi almacén (opcional, para descontar stock)</span>
-                                </button>
-                              ) : (
-                                <div className="space-y-1.5 bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-800/60">
-                                  <div className="flex items-center gap-2">
-                                    <select
-                                      value={row.selectedPartId || ''}
-                                      onChange={(e) => {
-                                        const pId = e.target.value;
-                                        if (!pId) {
-                                          updateRow({ selectedPartId: '', showInventorySelect: false });
-                                          return;
-                                        }
-                                        const sel = parts.find(p => String(p.id) === String(pId));
-                                        updateRow({
-                                          selectedPartId: pId,
-                                          name: sel ? sel.name : (row.name || row.manualName),
-                                          manualName: sel ? sel.name : (row.name || row.manualName),
-                                          partNumber: sel?.reference || row.partNumber || ''
-                                        });
-                                      }}
-                                      className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1.5 text-[11px] text-zinc-200 outline-none focus:border-orange-500"
-                                    >
-                                      <option value="">-- Seleccionar pieza de almacén --</option>
-                                      {parts.map(p => {
-                                        const purchases = p.purchases || [];
-                                        const totalStock = purchases.reduce((sum, b) => sum + (b.qty || 0), 0);
-                                        return (
-                                          <option key={p.id} value={String(p.id)}>
-                                            {p.name} (Stock almacén: {totalStock} {p.unit || 'ud'})
-                                          </option>
-                                        );
-                                      })}
-                                    </select>
-                                    <button
-                                      type="button"
-                                      onClick={() => updateRow({ selectedPartId: '', showInventorySelect: false })}
-                                      className="text-[10px] text-zinc-400 hover:text-zinc-200 px-2 py-1 shrink-0"
-                                    >
-                                      ✕ Quitar
-                                    </button>
-                                  </div>
-                                  {selectedPart && (
-                                    <p className="text-[10px] text-emerald-400/80">
-                                      ✓ Vinculado a almacén: se descontará del stock disponible al guardar.
-                                    </p>
-                                  )}
+                          {/* Acordeón expandible para desarrollar más */}
+                          {row.isExpanded && (
+                            <div className="bg-zinc-950/80 p-3 rounded-xl border border-zinc-800/80 space-y-2.5">
+                              <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider block">
+                                Detalles adicionales de la pieza (Opcional)
+                              </span>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <div>
+                                  <label className="block text-[10px] text-zinc-500 mb-1">Nº Parte / Ref. OEM</label>
+                                  <input
+                                    type="text"
+                                    placeholder="Ej: 760.12.000"
+                                    value={row.partNumber || ''}
+                                    onChange={(e) => updateRow({ partNumber: e.target.value })}
+                                    className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-200 outline-none focus:border-orange-500 font-mono"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] text-zinc-500 mb-1">Marca / Fabricante</label>
+                                  <input
+                                    type="text"
+                                    placeholder="Ej: Motorex, Brembo"
+                                    value={row.brand || ''}
+                                    onChange={(e) => updateRow({ brand: e.target.value })}
+                                    className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-200 outline-none focus:border-orange-500"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] text-zinc-500 mb-1">Coste pieza ({currencySymbol})</label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    placeholder="18.50"
+                                    value={row.cost || ''}
+                                    onChange={(e) => updateRow({ cost: e.target.value })}
+                                    className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-200 outline-none focus:border-orange-500 font-mono"
+                                  />
+                                </div>
+                              </div>
+
+                              {parts.length > 0 && (
+                                <div className="pt-1 border-t border-zinc-800/60 flex items-center justify-between">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setShowWarehousePicker(true);
+                                      setWarehousePickerSearch('');
+                                    }}
+                                    className="text-[11px] text-orange-400 hover:text-orange-300 font-medium flex items-center gap-1 transition-colors"
+                                  >
+                                    <Package className="w-3 h-3" />
+                                    <span>¿Prefieres elegirla de tu almacén para descontar stock?</span>
+                                  </button>
                                 </div>
                               )}
                             </div>
@@ -2781,16 +2938,27 @@ export function App() {
                       );
                     })}
 
-                    <button
-                      type="button"
-                      onClick={() => setNewMaintenanceForm({
-                        ...newMaintenanceForm,
-                        partsUsed: [...newMaintenanceForm.partsUsed, { name: '', qty: '', selectedPartId: '', showInventorySelect: false }]
-                      })}
-                      className="w-full py-2 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-orange-500/40 text-zinc-300 hover:text-orange-400 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Añadir otra pieza o consumible
-                    </button>
+                    <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setNewMaintenanceForm({
+                          ...newMaintenanceForm,
+                          partsUsed: [...newMaintenanceForm.partsUsed, { name: '', qty: '1', unit: 'ud', partNumber: '', brand: '', cost: '', selectedPartId: '', isExpanded: false }]
+                        })}
+                        className="w-full sm:flex-1 py-2.5 px-3 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-orange-500/40 text-zinc-300 hover:text-orange-400 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Añadir otra pieza manual
+                      </button>
+                      {parts.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => { setShowWarehousePicker(true); setWarehousePickerSearch(''); }}
+                          className="w-full sm:flex-1 py-2.5 px-3 rounded-xl bg-orange-500/10 border border-orange-500/30 hover:bg-orange-500/20 text-orange-400 hover:text-orange-300 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                        >
+                          <Package className="w-3.5 h-3.5" /> Añadir desde mi almacén
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -2908,6 +3076,128 @@ export function App() {
                 )}
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL BOTTOM SHEET / POPUP: SELECCIONAR PIEZA DE ALMACÉN */}
+      {showWarehousePicker && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-150">
+          <div 
+            className="w-full max-w-md bg-zinc-900 rounded-t-3xl sm:rounded-3xl border border-zinc-800 p-5 space-y-4 max-h-[85vh] flex flex-col shadow-2xl" 
+            style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400">
+                  <Package className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-white">Pieza de mi almacén</h3>
+                  <p className="text-[11px] text-zinc-400">Toca una pieza para añadirla a la intervención</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowWarehousePicker(false);
+                  setWarehousePickerSearch('');
+                }}
+                className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Buscador */}
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+              <input
+                type="text"
+                placeholder="Buscar por nombre o referencia..."
+                value={warehousePickerSearch}
+                onChange={(e) => setWarehousePickerSearch(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-8 py-2.5 text-xs text-zinc-200 outline-none focus:border-orange-500 placeholder:text-zinc-600 font-medium"
+                autoFocus
+              />
+              {warehousePickerSearch && (
+                <button
+                  type="button"
+                  onClick={() => setWarehousePickerSearch('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 text-xs px-1"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Lista de piezas con stock */}
+            <div className="flex-1 overflow-y-auto space-y-2 pr-0.5 min-h-[160px] max-h-[50vh]">
+              {(() => {
+                const q = (warehousePickerSearch || '').toLowerCase().trim();
+                const filtered = parts.filter(p =>
+                  (p.name || '').toLowerCase().includes(q) ||
+                  (p.reference || '').toLowerCase().includes(q) ||
+                  (p.category || '').toLowerCase().includes(q)
+                );
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="py-10 text-center text-xs text-zinc-500">
+                      No se encontraron piezas en tu almacén.
+                    </div>
+                  );
+                }
+
+                return filtered.map(p => {
+                  const totalStock = (p.purchases || []).reduce((sum, b) => sum + (b.qty || 0), 0);
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        const defaultQty = totalStock > 0 && totalStock < 1 ? String(totalStock) : '1';
+                        const newRow = {
+                          selectedPartId: String(p.id),
+                          name: p.name,
+                          partNumber: p.reference || '',
+                          brand: p.brand || '',
+                          cost: '',
+                          qty: defaultQty,
+                          unit: p.unit || 'ud',
+                          isExpanded: false
+                        };
+                        setNewMaintenanceForm(prev => ({
+                          ...prev,
+                          partsUsed: [...(prev.partsUsed || []), newRow]
+                        }));
+                        setShowWarehousePicker(false);
+                        setWarehousePickerSearch('');
+                      }}
+                      className="w-full p-3 rounded-xl bg-zinc-950 hover:bg-zinc-800/80 border border-zinc-800 hover:border-orange-500/50 transition-all text-left flex items-center justify-between gap-3 group active:scale-[0.99]"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-bold text-zinc-100 group-hover:text-orange-400 transition-colors truncate">
+                          {p.name}
+                        </p>
+                        <p className="text-[10px] text-zinc-500 font-mono truncate">
+                          {p.reference ? `Ref: ${p.reference}` : (p.category || 'Sin ref')}
+                        </p>
+                      </div>
+                      <div className="shrink-0">
+                        <span className={`text-[10px] font-mono px-2 py-1 rounded-md border font-semibold ${
+                          totalStock > 0
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                            : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                        }`}>
+                          Stock: {totalStock} {p.unit || 'ud'}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                });
+              })()}
+            </div>
           </div>
         </div>
       )}

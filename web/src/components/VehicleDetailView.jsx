@@ -1,4 +1,4 @@
-import { FileText, Edit2, Trash2, Gauge, TrendingUp, ShieldAlert, Plus, Paperclip, ChevronRight } from 'lucide-react';
+import { FileText, Edit2, Trash2, Gauge, TrendingUp, ShieldAlert, Plus, Paperclip, ChevronRight, Package } from 'lucide-react';
 import { translateCategory } from '../locales';
 import { getInspectionStatus, getInspectionLabel } from '../utils/dates';
 import { optimizeImageFile } from '../utils/image';
@@ -370,6 +370,25 @@ export function VehicleDetailView({
                     </>
                   )}
                 </div>
+
+                {/* Piezas usadas en esta intervención */}
+                {item.partsUsed && item.partsUsed.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                    {item.partsUsed.map((p, pIdx) => (
+                      <span
+                        key={pIdx}
+                        className="inline-flex items-center gap-1 text-[10px] bg-zinc-950 text-zinc-300 px-2 py-0.5 rounded-md border border-zinc-800 font-mono"
+                        title={p.reference ? `Ref: ${p.reference}` : ''}
+                      >
+                        <Package className="w-2.5 h-2.5 text-orange-400 shrink-0" />
+                        <span>{p.name} ({p.qty})</span>
+                        {p.reference && (
+                          <span className="text-zinc-500 text-[9px]">#{p.reference}</span>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                )}
 
                 {/* Línea 3: Desglose de Precio */}
                 <div className="flex items-center justify-between pt-1 border-t border-zinc-800/40 text-[11px]">
