@@ -2730,7 +2730,7 @@ export function App() {
                         className="py-3 px-3.5 rounded-xl bg-orange-500/10 border border-orange-500/30 hover:bg-orange-500/20 text-orange-400 hover:text-orange-300 text-xs font-bold transition-all flex items-center justify-center gap-2 group"
                       >
                         <Package className="w-4 h-4 group-hover:scale-110 transition-transform" />
-                        <span>Elegir de mi almacén</span>
+                        <span>Elegir de mi inventario</span>
                       </button>
                     )}
                   </div>
@@ -2767,7 +2767,7 @@ export function App() {
                                 <div className="min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <p className="text-xs font-bold text-zinc-100 truncate">
-                                      {selectedPart ? selectedPart.name : (row.name || 'Pieza de almacén')}
+                                      {selectedPart ? selectedPart.name : (row.name || 'Pieza de inventario')}
                                     </p>
                                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-zinc-950 border border-zinc-800 text-zinc-400">
                                       Stock total: <strong className="text-zinc-200">{totalStock} {unitLabel}</strong>
@@ -2822,7 +2822,7 @@ export function App() {
                               ) : (
                                 <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1.5 rounded-lg">
                                   <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                                  <span>Quedarán <strong>{Math.max(0, remaining)} {unitLabel}</strong> disponibles en tu almacén</span>
+                                  <span>Quedarán <strong>{Math.max(0, remaining)} {unitLabel}</strong> disponibles en tu inventario</span>
                                 </div>
                               )}
                             </div>
@@ -2943,7 +2943,7 @@ export function App() {
                                     className="text-[11px] text-orange-400 hover:text-orange-300 font-medium flex items-center gap-1 transition-colors"
                                   >
                                     <Package className="w-3 h-3" />
-                                    <span>¿Prefieres elegirla de tu almacén para descontar stock?</span>
+                                    <span>¿Prefieres elegirla de tu inventario para descontar stock?</span>
                                   </button>
                                 </div>
                               )}
@@ -2970,7 +2970,7 @@ export function App() {
                           onClick={() => { setShowWarehousePicker(true); setWarehousePickerSearch(''); }}
                           className="w-full sm:flex-1 py-2.5 px-3 rounded-xl bg-orange-500/10 border border-orange-500/30 hover:bg-orange-500/20 text-orange-400 hover:text-orange-300 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
                         >
-                          <Package className="w-3.5 h-3.5" /> Añadir desde mi almacén
+                          <Package className="w-3.5 h-3.5" /> Añadir desde mi inventario
                         </button>
                       )}
                     </div>
@@ -3108,7 +3108,7 @@ export function App() {
                   <Package className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-sm text-white">Pieza de mi almacén</h3>
+                  <h3 className="font-bold text-sm text-white">Pieza de mi inventario</h3>
                   <p className="text-[11px] text-zinc-400">Toca una pieza para añadirla a la intervención</p>
                 </div>
               </div>
@@ -3159,7 +3159,7 @@ export function App() {
                 if (filtered.length === 0) {
                   return (
                     <div className="py-10 text-center text-xs text-zinc-500">
-                      No se encontraron piezas en tu almacén.
+                      No se encontraron piezas en tu inventario.
                     </div>
                   );
                 }

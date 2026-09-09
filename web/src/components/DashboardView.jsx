@@ -67,6 +67,7 @@ export function DashboardView({
           subtitle={language === 'es' ? 'En Garaje' : language === 'en' ? 'In Garage' : language === 'it' ? 'Nel Garage' : language === 'fr' ? 'Au Garage' : language === 'de' ? 'In der Garage' : 'Na Garagem'}
           icon={Bike}
           color="text-orange-400"
+          onClick={() => setActiveTab('garage')}
         />
         {(() => {
           const lowStockCount = parts.filter(p => {
@@ -84,6 +85,7 @@ export function DashboardView({
               icon={ShieldAlert}
               color={totalAlerts > 0 ? "text-rose-400" : "text-emerald-400"}
               highlight={totalAlerts > 0}
+              onClick={() => setActiveTab(lowStockCount > 0 ? 'parts' : 'garage')}
             />
           );
         })()}
@@ -100,6 +102,7 @@ export function DashboardView({
               subtitle={lowStockCount > 0 ? `${lowStockCount} ${language === 'es' ? 'por reponer' : language === 'en' ? 'to order' : language === 'it' ? 'da ordinare' : language === 'fr' ? 'à commander' : language === 'de' ? 'zu bestellen' : 'a encomendar'}` : (language === 'es' ? 'Stock suficiente' : language === 'en' ? 'Stock OK' : language === 'it' ? 'Scorta ok' : language === 'fr' ? 'Stock suffisant' : language === 'de' ? 'Bestand ausreichend' : 'Stock suficiente')}
               icon={Wrench}
               color="text-blue-400"
+              onClick={() => setActiveTab('parts')}
             />
           );
         })()}
