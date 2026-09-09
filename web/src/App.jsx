@@ -2668,26 +2668,32 @@ export function App() {
                   );
                 })()}
                 <div>
-                  <label className="block text-zinc-400 font-medium mb-1">Tipo Servicio</label>
-                  <select 
-                    value={newMaintenanceForm.type}
-                    onChange={(e) => setNewMaintenanceForm({ ...newMaintenanceForm, type: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-medium"
-                  >
-                    <option value="Preventivo">Preventivo</option>
-                    <option value="Mejora / Modificación">Mejora / Modificación</option>
-                    <option value="Repuesto">Repuesto</option>
-                    <option value="Correctivo">Correctivo</option>
-                  </select>
+                  <label className="block text-zinc-400 font-medium mb-1 text-xs">Tipo Servicio</label>
+                  <div className="relative flex items-center">
+                    <select 
+                      value={newMaintenanceForm.type}
+                      onChange={(e) => setNewMaintenanceForm({ ...newMaintenanceForm, type: e.target.value })}
+                      className="w-full h-11 bg-zinc-950 border border-zinc-800 rounded-xl px-3 pr-8 text-zinc-200 outline-none focus:border-orange-500 font-medium text-xs cursor-pointer appearance-none"
+                    >
+                      <option value="Preventivo">Preventivo</option>
+                      <option value="Mejora / Modificación">Mejora / Modificación</option>
+                      <option value="Repuesto">Repuesto</option>
+                      <option value="Correctivo">Correctivo</option>
+                    </select>
+                    <ChevronDown className="w-4 h-4 absolute right-3 text-zinc-500 pointer-events-none" />
+                  </div>
                 </div>
                 <div>
-                  <label className="block text-zinc-400 font-medium mb-1">Fecha</label>
-                  <input 
-                    type="date" 
-                    value={newMaintenanceForm.date}
-                    onChange={(e) => setNewMaintenanceForm({ ...newMaintenanceForm, date: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-zinc-200 outline-none focus:border-orange-500 font-mono" 
-                  />
+                  <label className="block text-zinc-400 font-medium mb-1 text-xs">Fecha</label>
+                  <div className="relative flex items-center">
+                    <input 
+                      type="date" 
+                      value={newMaintenanceForm.date}
+                      onChange={(e) => setNewMaintenanceForm({ ...newMaintenanceForm, date: e.target.value })}
+                      className="w-full h-11 bg-zinc-950 border border-zinc-800 rounded-xl px-3 pr-8 text-zinc-200 outline-none focus:border-orange-500 font-mono text-xs cursor-pointer [color-scheme:dark]" 
+                    />
+                    <Calendar className="w-4 h-4 absolute right-3 text-zinc-500 pointer-events-none" />
+                  </div>
                 </div>
               </div>
 
@@ -2778,7 +2784,7 @@ export function App() {
                               <button
                                 type="button"
                                 onClick={removeRow}
-                                className="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 transition-colors shrink-0"
+                                className="p-2 rounded-xl bg-zinc-950 hover:bg-zinc-900 border border-zinc-800 hover:border-rose-500/40 text-zinc-400 hover:text-rose-400 transition-colors shrink-0"
                                 title="Eliminar pieza"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -2827,53 +2833,62 @@ export function App() {
                       // Pieza manual
                       return (
                         <div key={idx} className="p-3 bg-zinc-900/90 rounded-2xl border border-zinc-800 space-y-2.5">
-                          <div className="flex items-center gap-1.5 sm:gap-2">
+                          {/* Fila 1: Nombre de la pieza + Botón de borrar integrado */}
+                          <div className="flex items-center gap-2">
                             <input
                               type="text"
-                              placeholder="Pieza o consumible (ej: Aceite 2T, Filtro...)"
+                              placeholder="Pieza o consumible (ej: Neumático, Aceite...)"
                               value={row.name ?? row.manualName ?? ''}
                               onChange={(e) => updateRow({ name: e.target.value, manualName: e.target.value })}
-                              className="flex-1 min-w-[120px] bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 text-xs font-medium placeholder:text-zinc-600"
+                              className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 text-xs font-medium placeholder:text-zinc-600"
                             />
-                            <input
-                              type="number"
-                              step="any"
-                              min="0"
-                              placeholder="1"
-                              value={row.qty ?? ''}
-                              onChange={(e) => updateRow({ qty: e.target.value })}
-                              className="w-16 sm:w-20 bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 text-xs font-mono text-center font-bold placeholder:text-zinc-600"
-                            />
-                            <select
-                              value={row.unit || 'ud'}
-                              onChange={(e) => updateRow({ unit: e.target.value })}
-                              className="w-16 sm:w-20 bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-300 outline-none focus:border-orange-500 text-xs font-mono cursor-pointer"
+                            <button
+                              type="button"
+                              onClick={removeRow}
+                              className="p-2.5 rounded-xl bg-zinc-950 hover:bg-zinc-900 border border-zinc-800 hover:border-rose-500/40 text-zinc-400 hover:text-rose-400 transition-colors shrink-0"
+                              title="Eliminar pieza"
                             >
-                              <option value="ud">ud</option>
-                              <option value="ml">ml</option>
-                              <option value="L">L</option>
-                              <option value="g">g</option>
-                              <option value="kg">kg</option>
-                            </select>
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          {/* Fila 2: Cantidad + Unidad + Botón Más datos */}
+                          <div className="flex items-center justify-between gap-2 pt-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] text-zinc-500 font-mono">Cant:</span>
+                              <input
+                                type="number"
+                                step="any"
+                                min="0"
+                                placeholder="1"
+                                value={row.qty ?? ''}
+                                onChange={(e) => updateRow({ qty: e.target.value })}
+                                className="w-16 bg-zinc-950 border border-zinc-800 rounded-xl p-2 text-zinc-200 outline-none focus:border-orange-500 text-xs font-mono text-center font-bold"
+                              />
+                              <select
+                                value={row.unit || 'ud'}
+                                onChange={(e) => updateRow({ unit: e.target.value })}
+                                className="bg-zinc-950 border border-zinc-800 rounded-xl p-2 text-zinc-300 outline-none focus:border-orange-500 text-xs font-mono cursor-pointer"
+                              >
+                                <option value="ud">ud</option>
+                                <option value="ml">ml</option>
+                                <option value="L">L</option>
+                                <option value="g">g</option>
+                                <option value="kg">kg</option>
+                              </select>
+                            </div>
+
                             <button
                               type="button"
                               onClick={() => updateRow({ isExpanded: !row.isExpanded })}
-                              className={`p-2.5 rounded-xl border transition-colors flex items-center justify-center shrink-0 ${
+                              className={`px-3 py-1.5 rounded-xl border text-[11px] font-medium transition-colors flex items-center gap-1.5 shrink-0 ${
                                 row.isExpanded || row.partNumber || row.brand || row.cost
                                   ? 'bg-orange-500/10 border-orange-500/30 text-orange-400'
                                   : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'
                               }`}
-                              title="Más detalles (Nº parte, marca, coste)"
                             >
-                              {row.isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={removeRow}
-                              className="p-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 transition-colors shrink-0"
-                              title="Eliminar"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>{row.isExpanded ? 'Menos datos' : 'Más datos'}</span>
+                              {row.isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                             </button>
                           </div>
 
