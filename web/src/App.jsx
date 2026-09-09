@@ -1522,7 +1522,7 @@ export function App() {
     category: 'Motor & Transmisión',
     usageAtService: '',
     secondaryReading: '',
-    partsUsed: [{ selectedPartId: '', manualName: '', partNumber: '', qty: '1' }],
+    partsUsed: [],
     receipts: [],
     partsCost: '',
     laborCost: '',
@@ -1579,44 +1579,55 @@ export function App() {
     const targetVehicle = newMaintenanceForm.vehicle || selectedVehicle?.name || vehicles[0]?.name;
     const currentVehObj = vehicles.find(v => v.name.toLowerCase() === targetVehicle.toLowerCase());
 
-    // Procesa cada fila de "piezas usadas": si venía del inventario, descuenta stock FIFO;
-    // si era un nombre escrito a mano (sin repuesto existente), crea la ficha en Repuestos con
-    // stock 0 para que quede disponible la próxima vez (ver [[project_vehicle_alerts_and_push]]-style
-    // decisión: no forzamos al usuario a dar de alta el repuesto antes de poder registrar su uso).
-    const partsUsedRows = (newMaintenanceForm.partsUsed || []).filter(row => row.selectedPartId || (row.manualName || '').trim());
+    // Procesa cada fila de piezas o consumibles usados:
+    // Si viene vinculada a una pieza de inventario (selectedPartId), descuenta stock FIFO.
+    // Si es texto libre (ej: "Aceite 2T 300ml"), NO crea fichas fantasma en el inventario;
+    // se guarda directamente en el registro del mantenimiento.
+    const partsUsedRows = (newMaintenanceForm.partsUsed || []).filter(row =>
+      (row.name || row.manualName || '').trim() || row.selectedPartId
+    );
     const builtPartsUsed = [];
     for (const row of partsUsedRows) {
-      const qty = parseFloat(row.qty) || 1;
+      const name = (row.name || row.manualName || '').trim();
+      const qtyStr = (row.qty || '1').trim();
+      const parsedMatch = qtyStr.match(/^([0-9]+(?:[.,][0-9]+)?)/);
+      const qtyNum = parsedMatch ? parseFloat(parsedMatch[1].replace(',', '.')) : 1;
+
       if (row.selectedPartId) {
         const targetPart = parts.find(p => String(p.id) === String(row.selectedPartId));
-        if (!targetPart) continue;
-        if (!editingMaintenanceId && targetPart.purchases && targetPart.purchases.length > 0) {
-          let qtyToDeduct = qty;
-          const updatedPurchases = targetPart.purchases.map(batch => {
-            if (qtyToDeduct <= 0) return batch;
-            if (batch.qty >= qtyToDeduct) {
-              const remaining = Math.max(0, parseFloat((batch.qty - qtyToDeduct).toFixed(3)));
-              qtyToDeduct = 0;
-              return { ...batch, qty: remaining };
-            } else {
-              qtyToDeduct = parseFloat((qtyToDeduct - batch.qty).toFixed(3));
-              return { ...batch, qty: 0 };
-            }
-          }).filter(b => b.qty > 0);
-          await firestoreUpdate('parts', targetPart.id, { purchases: updatedPurchases });
+        if (targetPart) {
+          if (!editingMaintenanceId && targetPart.purchases && targetPart.purchases.length > 0) {
+            let qtyToDeduct = qtyNum;
+            const updatedPurchases = targetPart.purchases.map(batch => {
+              if (qtyToDeduct <= 0) return batch;
+              if (batch.qty >= qtyToDeduct) {
+                const remaining = Math.max(0, parseFloat((batch.qty - qtyToDeduct).toFixed(3)));
+                qtyToDeduct = 0;
+                return { ...batch, qty: remaining };
+              } else {
+                qtyToDeduct = parseFloat((qtyToDeduct - batch.qty).toFixed(3));
+                return { ...batch, qty: 0 };
+              }
+            }).filter(b => b.qty > 0);
+            await firestoreUpdate('parts', targetPart.id, { purchases: updatedPurchases });
+          }
+          builtPartsUsed.push({
+            id: targetPart.id,
+            name: targetPart.name,
+            reference: row.partNumber || targetPart.reference || null,
+            qty: qtyStr
+          });
+          continue;
         }
-        builtPartsUsed.push({ id: targetPart.id, name: targetPart.name, reference: row.partNumber || targetPart.reference || null, qty: String(qty) });
-      } else {
-        const manualName = row.manualName.trim();
-        const newPartId = await firestoreAdd('parts', {
-          name: manualName,
-          reference: row.partNumber || null,
-          unit: 'ud',
-          compatibleVehicles: [targetVehicle],
-          purchases: []
-        });
-        builtPartsUsed.push({ id: newPartId, name: manualName, reference: row.partNumber || null, qty: String(qty) });
       }
+
+      // Pieza o consumible libre (sin stock ni ficha fantasma en almacén):
+      builtPartsUsed.push({
+        id: null,
+        name: name,
+        reference: row.partNumber || null,
+        qty: qtyStr
+      });
     }
 
     const totalCostNum = (parseFloat(newMaintenanceForm.partsCost) || 0) + (parseFloat(newMaintenanceForm.laborCost) || 0);
@@ -1986,10 +1997,17 @@ export function App() {
     setEditingMaintenanceId(item.id);
     // Compatibilidad con registros antiguos que solo tenían un repuesto (usedPartId/usedPartName/usedPartQty)
     const partsUsedRows = item.partsUsed && item.partsUsed.length > 0
-      ? item.partsUsed.map(p => ({ selectedPartId: p.id ? String(p.id) : '', manualName: p.id ? '' : (p.name || ''), partNumber: p.reference || '', qty: String(p.qty || '1') }))
+      ? item.partsUsed.map(p => ({
+          selectedPartId: p.id ? String(p.id) : '',
+          name: p.name || '',
+          manualName: p.name || '',
+          partNumber: p.reference || '',
+          qty: String(p.qty || '1'),
+          showInventorySelect: Boolean(p.id)
+        }))
       : item.usedPartId
-        ? [{ selectedPartId: String(item.usedPartId), manualName: '', partNumber: item.partNumber || '', qty: String(item.usedPartQty || '1') }]
-        : [{ selectedPartId: '', manualName: '', partNumber: '', qty: '1' }];
+        ? [{ selectedPartId: String(item.usedPartId), name: item.usedPartName, manualName: item.usedPartName, partNumber: item.partNumber || '', qty: String(item.usedPartQty || '1'), showInventorySelect: true }]
+        : [];
     setNewMaintenanceForm({
       vehicle: item.vehicle,
       title: item.title,
@@ -2636,130 +2654,145 @@ export function App() {
                 </div>
               </div>
 
-              {/* Piezas usadas: cada fila puede venir del inventario (descuenta stock) o ser un nombre
-                  escrito a mano (se crea en Repuestos con stock 0 para poder reponerla más adelante) */}
+              {/* Piezas y consumibles usados */}
               <div className="bg-zinc-950/80 p-3.5 rounded-2xl border border-zinc-800/80 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-mono text-orange-400 font-bold uppercase tracking-wider">📦 Piezas Usadas (Opcional)</span>
+                  <span className="text-[11px] font-mono text-orange-400 font-bold uppercase tracking-wider">
+                    📦 Piezas / Consumibles (Opcional)
+                  </span>
+                  {newMaintenanceForm.partsUsed.length > 0 && (
+                    <span className="text-[10px] text-zinc-500 font-mono">
+                      {newMaintenanceForm.partsUsed.length} {newMaintenanceForm.partsUsed.length === 1 ? 'añadida' : 'añadidas'}
+                    </span>
+                  )}
                 </div>
 
-                {newMaintenanceForm.partsUsed.map((row, idx) => {
-                  const pObj = row.selectedPartId ? parts.find(p => String(p.id) === String(row.selectedPartId)) : null;
-                  const updateRow = (patch) => {
-                    const next = newMaintenanceForm.partsUsed.map((r, i) => i === idx ? { ...r, ...patch } : r);
-                    setNewMaintenanceForm({ ...newMaintenanceForm, partsUsed: next });
-                  };
-                  return (
-                    <div key={idx} className="space-y-2 pb-3 border-b border-zinc-800/60 last:border-0 last:pb-0">
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="col-span-2">
-                          <select
-                            value={row.selectedPartId}
-                            onChange={(e) => {
-                              const partIdStr = e.target.value;
-                              if (!partIdStr) {
-                                updateRow({ selectedPartId: '' });
-                                return;
-                              }
-                              const selected = parts.find(p => String(p.id) === String(partIdStr));
-                              updateRow({
-                                selectedPartId: partIdStr,
-                                manualName: '',
-                                partNumber: !row.partNumber && selected?.reference ? selected.reference : row.partNumber
-                              });
-                            }}
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-medium"
-                          >
-                            <option value="">-- Escribir pieza manualmente (sin inventario) --</option>
-                            {parts.map(p => {
-                              const purchases = p.purchases || [];
-                              const rawStock = purchases.reduce((sum, b) => sum + (b.qty || 0), 0);
-                              const totalStock = parseFloat(rawStock.toFixed(3));
-                              const activeBatch = purchases.find(b => b.qty > 0);
-                              const unitPrice = activeBatch ? activeBatch.pricePerUnit : 0;
-                              const unitPriceCurrency = activeBatch?.pricePerUnitCurrency || '€';
-                              const isCurrentSelected = String(p.id) === String(row.selectedPartId);
-                              return (
-                                <option key={p.id} value={String(p.id)} disabled={totalStock <= 0 && !isCurrentSelected}>
-                                  {p.name} (Stock: {totalStock} {p.unit || 'ud'} | {unitPrice > 0 ? `${unitPrice.toFixed(2)} ${unitPriceCurrency}/${p.unit || 'ud'}` : 'Sin precio'}) {totalStock <= 0 ? '- ¡AGOTADO!' : ''}
-                                </option>
-                              );
-                            })}
-                          </select>
-                        </div>
-                        <div>
-                          <input
-                            type="number"
-                            min="0.01"
-                            step="0.01"
-                            placeholder={`Cant. (1 ${pObj?.unit || 'ud'})`}
-                            value={row.qty}
-                            onChange={(e) => updateRow({ qty: e.target.value })}
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-mono"
-                          />
-                        </div>
-                      </div>
-                      {!row.selectedPartId && (
-                        <input
-                          type="text"
-                          placeholder="Nombre de la pieza (Ej: Disco de freno delantero)"
-                          value={row.manualName}
-                          onChange={(e) => updateRow({ manualName: e.target.value })}
-                          className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500"
-                        />
-                      )}
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          placeholder="Número de pieza / referencia (Ej: Brembo 110A26310)"
-                          value={row.partNumber}
-                          onChange={(e) => updateRow({ partNumber: e.target.value })}
-                          className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 font-mono"
-                        />
-                        {newMaintenanceForm.partsUsed.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => setNewMaintenanceForm({ ...newMaintenanceForm, partsUsed: newMaintenanceForm.partsUsed.filter((_, i) => i !== idx) })}
-                            className="p-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 transition-colors shrink-0"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                      {!row.selectedPartId && row.manualName.trim() && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setNewPartForm({
-                              name: row.manualName.trim(),
-                              reference: row.partNumber || '',
-                              unit: 'ud',
-                              compatibleVehicles: [newMaintenanceForm.vehicle],
-                              minStock: '1',
-                              initialQty: '0',
-                              initialPrice: '',
-                              initialSupplier: '',
-                              initialDate: new Date().toISOString().split('T')[0]
-                            });
-                            setPartLinkRowIndex(idx);
-                            setShowAddPartModal(true);
-                          }}
-                          className="text-[11px] font-bold text-orange-400 hover:text-orange-300 flex items-center gap-1"
-                        >
-                          <Plus className="w-3 h-3" /> Rellenar ficha completa (precio, stock, compatibilidad…)
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
+                {newMaintenanceForm.partsUsed.length === 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setNewMaintenanceForm({
+                      ...newMaintenanceForm,
+                      partsUsed: [{ name: '', qty: '', selectedPartId: '', showInventorySelect: false }]
+                    })}
+                    className="w-full py-3 px-4 rounded-xl bg-zinc-900/60 border border-dashed border-zinc-800 hover:border-orange-500/50 hover:bg-zinc-900 text-zinc-400 hover:text-zinc-200 text-xs font-medium transition-all flex items-center justify-center gap-2"
+                  >
+                    <Plus className="w-4 h-4 text-orange-400" />
+                    <span>Añadir pieza o consumible (aceite, bujía, filtro...)</span>
+                  </button>
+                ) : (
+                  <div className="space-y-3">
+                    {newMaintenanceForm.partsUsed.map((row, idx) => {
+                      const selectedPart = row.selectedPartId ? parts.find(p => String(p.id) === String(row.selectedPartId)) : null;
+                      const updateRow = (patch) => {
+                        const next = newMaintenanceForm.partsUsed.map((r, i) => i === idx ? { ...r, ...patch } : r);
+                        setNewMaintenanceForm({ ...newMaintenanceForm, partsUsed: next });
+                      };
+                      return (
+                        <div key={idx} className="p-3 bg-zinc-900/80 rounded-xl border border-zinc-800 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              placeholder="Ej: Aceite Motorex 2T, Filtro aire..."
+                              value={row.name ?? row.manualName ?? ''}
+                              onChange={(e) => updateRow({ name: e.target.value, manualName: e.target.value })}
+                              className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 text-xs font-medium placeholder:text-zinc-600"
+                            />
+                            <input
+                              type="text"
+                              placeholder="Ej: 300 ml, 1 ud"
+                              value={row.qty || ''}
+                              onChange={(e) => updateRow({ qty: e.target.value })}
+                              className="w-28 sm:w-32 bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 outline-none focus:border-orange-500 text-xs font-medium font-mono placeholder:text-zinc-600"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setNewMaintenanceForm({
+                                ...newMaintenanceForm,
+                                partsUsed: newMaintenanceForm.partsUsed.filter((_, i) => i !== idx)
+                              })}
+                              className="p-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 transition-colors shrink-0"
+                              title="Eliminar"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
 
-                <button
-                  type="button"
-                  onClick={() => setNewMaintenanceForm({ ...newMaintenanceForm, partsUsed: [...newMaintenanceForm.partsUsed, { selectedPartId: '', manualName: '', partNumber: '', qty: '1' }] })}
-                  className="w-full py-2 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-orange-500/40 text-zinc-300 hover:text-orange-400 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Añadir otra pieza
-                </button>
+                          {/* Vinculación opcional con inventario de repuestos */}
+                          {parts.length > 0 && (
+                            <div className="pt-1">
+                              {!row.showInventorySelect && !row.selectedPartId ? (
+                                <button
+                                  type="button"
+                                  onClick={() => updateRow({ showInventorySelect: true })}
+                                  className="text-[11px] text-zinc-500 hover:text-orange-400 font-medium flex items-center gap-1 transition-colors"
+                                >
+                                  <span>📦 Vincular a pieza de mi almacén (opcional, para descontar stock)</span>
+                                </button>
+                              ) : (
+                                <div className="space-y-1.5 bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-800/60">
+                                  <div className="flex items-center gap-2">
+                                    <select
+                                      value={row.selectedPartId || ''}
+                                      onChange={(e) => {
+                                        const pId = e.target.value;
+                                        if (!pId) {
+                                          updateRow({ selectedPartId: '', showInventorySelect: false });
+                                          return;
+                                        }
+                                        const sel = parts.find(p => String(p.id) === String(pId));
+                                        updateRow({
+                                          selectedPartId: pId,
+                                          name: sel ? sel.name : (row.name || row.manualName),
+                                          manualName: sel ? sel.name : (row.name || row.manualName),
+                                          partNumber: sel?.reference || row.partNumber || ''
+                                        });
+                                      }}
+                                      className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1.5 text-[11px] text-zinc-200 outline-none focus:border-orange-500"
+                                    >
+                                      <option value="">-- Seleccionar pieza de almacén --</option>
+                                      {parts.map(p => {
+                                        const purchases = p.purchases || [];
+                                        const totalStock = purchases.reduce((sum, b) => sum + (b.qty || 0), 0);
+                                        return (
+                                          <option key={p.id} value={String(p.id)}>
+                                            {p.name} (Stock almacén: {totalStock} {p.unit || 'ud'})
+                                          </option>
+                                        );
+                                      })}
+                                    </select>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateRow({ selectedPartId: '', showInventorySelect: false })}
+                                      className="text-[10px] text-zinc-400 hover:text-zinc-200 px-2 py-1 shrink-0"
+                                    >
+                                      ✕ Quitar
+                                    </button>
+                                  </div>
+                                  {selectedPart && (
+                                    <p className="text-[10px] text-emerald-400/80">
+                                      ✓ Vinculado a almacén: se descontará del stock disponible al guardar.
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    <button
+                      type="button"
+                      onClick={() => setNewMaintenanceForm({
+                        ...newMaintenanceForm,
+                        partsUsed: [...newMaintenanceForm.partsUsed, { name: '', qty: '', selectedPartId: '', showInventorySelect: false }]
+                      })}
+                      className="w-full py-2 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-orange-500/40 text-zinc-300 hover:text-orange-400 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Añadir otra pieza o consumible
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Desglose Económico */}
